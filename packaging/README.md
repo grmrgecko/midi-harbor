@@ -73,14 +73,44 @@ To build them on a Mac without Docker, run `packaging/macos/build.sh`, which wri
 and builds a universal binary when both Rust targets are installed (`rustup target add
 x86_64-apple-darwin aarch64-apple-darwin`), and a binary for the building Mac otherwise.
 
-`packaging/macos/build.sh --app-store` builds the Mac App Store variant instead, into
-`target/package/macos-app-store/`: sandboxed, requiring macOS 13, starting without a Dock icon,
-and carrying the headless build as `Contents/MacOS/midi-harbor-daemon`, the daemon the app starts.
-The app is signed with `packaging/macos/app-store.entitlements` and the helper with
-`packaging/macos/helper.entitlements`, which lets it take the app's sandbox. It makes no disk
-image: the App Store takes an installer package, built with the owner's certificates and
-provisioning profile. It signs ad hoc unless `MIDI_HARBOR_SIGNING_IDENTITY` names a certificate,
-since a Developer ID one is the wrong kind for the App Store.
+`make appstore`, which runs `packaging/macos/build.sh --app-store`, builds the Mac App Store
+variant instead, into `target/package/macos-app-store/`: sandboxed, requiring macOS 13, starting
+without a Dock icon, and carrying the headless build as `Contents/MacOS/midi-harbor-daemon`, the
+daemon the app starts. The app is signed with `packaging/macos/app-store.entitlements` and the
+helper with `packaging/macos/helper.entitlements`, which lets it take the app's sandbox. It makes
+no disk image.
+
+With a provisioning profile in `.signing/app-store.provisionprofile` it is built for submission,
+as `Midi-Harbor-<version>.pkg` beside the app:
+
+- the profile is embedded as `Contents/embedded.provisionprofile`, and the App ID and team it
+  names are added to the app's entitlements; a profile for another App ID is refused;
+- both executables are signed with the keychain's Apple Distribution identity, or the one
+  `MIDI_HARBOR_SIGNING_IDENTITY` names;
+- the build number, `CFBundleVersion`, is the build's time in UTC (`202609281937`), since every
+  upload needs a higher one, while the version shown stays `VERSION`;
+- `ITSAppUsesNonExemptEncryption` is false: hashing and random numbers are all the encryption
+  Midi Harbor has;
+- the installer package is signed with the keychain's Mac Installer Distribution identity, which
+  the keychain names "3rd Party Mac Developer Installer".
+
+Upload the package with Apple's Transporter app, then choose the build in App Store Connect for
+TestFlight or review. An App Store build does not run until the App Store installs it. Without
+the profile, the app is signed ad hoc, or with `MIDI_HARBOR_SIGNING_IDENTITY`, to run on this Mac.
+
+Setting up for submission, once:
+
+1. In Xcode, **Settings → Accounts → Manage Certificates**, add an **Apple Distribution** and a
+   **Mac Installer Distribution** certificate. If the keychain calls them untrusted
+   (`security find-identity -v` leaves them out), install Apple's
+   [WWDR G3 intermediate](https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer).
+2. In the developer portal, **Identifiers**, register an explicit macOS App ID for
+   `com.mrgeckosmedia.MidiHarbor`, with no capabilities: every entitlement the build uses is a
+   sandbox one that signing grants.
+3. In **Profiles**, generate a **Mac App Store Connect** distribution profile for that App ID and
+   the Apple Distribution certificate, and save it as `.signing/app-store.provisionprofile`. It
+   lasts a year, and is made again when it or the certificate is renewed.
+4. In App Store Connect, add the app with that bundle ID.
 
 The app is signed with the hardened runtime either way, as notarization requires. Bluetooth
 permission is granted to the signed app, which is why the daemon should run from inside it:
@@ -106,8 +136,9 @@ every build that finds them, `make snapshot` included, and adds a few minutes.
 To make them, once:
 
 1. In Xcode, **Settings → Accounts → Manage Certificates**, add a **Developer ID Application**
-   certificate; only the team's Account Holder can. In Keychain Access, export it with its private key from **My Certificates** as
-   `.signing/developer-id.p12`, and write the password to `.signing/developer-id.p12.password`.
+   certificate; only the team's Account Holder can. In Keychain Access, export it with its
+   private key from **My Certificates** as `.signing/developer-id.p12`, and write the password to
+   `.signing/developer-id.p12.password`.
    Keychain Access exports the older `.p12` encryption rcodesign reads; one made by OpenSSL 3
    needs `-legacy`.
 2. In App Store Connect, **Users and Access → Integrations → App Store Connect API**, generate a

@@ -81,6 +81,13 @@ release: | $(SYSROOT_DONE)
 		|| { echo "HEAD is not tagged v$(VERSION); tag it and push the tag: git tag v$(VERSION) && git push origin v$(VERSION)" >&2; exit 1; }
 	$(call GORELEASER,--env-file .release-env) release --clean --parallelism 1
 
+# Builds the Mac App Store variant on a Mac, into target/package/macos-app-store: an installer
+# package for App Store Connect when .signing/app-store.provisionprofile exists, and an app signed
+# to run on this Mac otherwise. See packaging/README.md.
+.PHONY: appstore
+appstore:
+	packaging/macos/build.sh --app-store
+
 # Removes every build output, the Linux sysroots under target/ included, which the next release
 # builds again.
 .PHONY: clean

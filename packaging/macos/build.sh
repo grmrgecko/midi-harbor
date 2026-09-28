@@ -7,7 +7,8 @@
 #
 # --app-store builds the sandboxed App Store variant instead, under target/package/macos-app-store:
 # the full program as the app and the headless build as the daemon it starts
-# (specs/014-mac-app-store-mode/contracts/bundle.md).
+# (specs/014-mac-app-store-mode/contracts/bundle.md), and the installer package App Store Connect
+# takes when .signing/app-store.provisionprofile exists. `make appstore` runs it.
 #
 # Signs and notarizes as packaging/macos/bundle.sh describes. Builds universal binaries
 # when the x86_64 target is installed (rustup target add x86_64-apple-darwin), and binaries for

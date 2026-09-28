@@ -20,8 +20,12 @@
 #
 # --helper makes the App Store variant instead, on a Mac only: the sandboxed app, with the helper
 # as the daemon it starts (Contents/MacOS/midi-harbor-daemon), requiring macOS 13 and starting
-# without a Dock icon. It makes no disk image, since the App Store takes an installer package
-# built with the owner's certificates (specs/014-mac-app-store-mode/contracts/bundle.md).
+# without a Dock icon (specs/014-mac-app-store-mode/contracts/bundle.md). With a Mac App Store
+# Connect provisioning profile in .signing/app-store.provisionprofile it is built for submission:
+# the profile embedded, signed with the keychain's Apple Distribution identity, and wrapped in an
+# installer package signed with its Mac Installer Distribution identity, the only form App Store
+# Connect takes (specs/016-app-store-submission). Without one it is signed ad hoc, or with
+# MIDI_HARBOR_SIGNING_IDENTITY, to run on this Mac.
 set -eu
 
 helper=
@@ -53,19 +57,66 @@ sed "s/@VERSION@/${version%%-*}/g" packaging/macos/Info.plist > "$app/Contents/I
 # The App Store variant: the helper signed first, since signing the bundle seals it, then the
 # app with the sandbox.
 if [ -n "$helper" ]; then
-    identity=${MIDI_HARBOR_SIGNING_IDENTITY:--}
+    profile=.signing/app-store.provisionprofile
+    entitlements=packaging/macos/app-store.entitlements
     cp "$helper" "$app/Contents/MacOS/midi-harbor-daemon"
     chmod 0755 "$app/Contents/MacOS/midi-harbor-daemon"
     plutil -replace LSMinimumSystemVersion -string 13.0 "$app/Contents/Info.plist"
     plutil -replace LSUIElement -bool true "$app/Contents/Info.plist"
+    # Hashing and random numbers are all the encryption it has, which is exempt, so App Store
+    # Connect need not ask at every upload.
+    plutil -replace ITSAppUsesNonExemptEncryption -bool false "$app/Contents/Info.plist"
+
+    # For submission: the identities, the profile, and the identifiers it grants.
+    if [ -f "$profile" ]; then
+        identity=${MIDI_HARBOR_SIGNING_IDENTITY:-$(security find-identity -v -p codesigning \
+            | sed -n 's/^.*"\(Apple Distribution: .*\)"$/\1/p' | head -n 1)}
+        installer=$(security find-identity -v \
+            | sed -n 's/^.*"\(3rd Party Mac Developer Installer: .*\)"$/\1/p' | head -n 1)
+        if [ -z "$identity" ] || [ -z "$installer" ]; then
+            echo "$profile needs an Apple Distribution and a Mac Installer Distribution" \
+                "certificate in the keychain; see packaging/README.md" >&2
+            exit 1
+        fi
+        security cms -D -i "$profile" -o "$out/profile.plist"
+        field() { /usr/libexec/PlistBuddy -c "Print :$1" "$out/profile.plist"; }
+        team=$(field Entitlements:com.apple.developer.team-identifier)
+        app_id=$(field Entitlements:com.apple.application-identifier)
+        bundle_id=$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")
+        if [ "$app_id" != "$team.$bundle_id" ]; then
+            echo "$profile is for $app_id, not $team.$bundle_id" >&2
+            exit 1
+        fi
+        cp "$profile" "$app/Contents/embedded.provisionprofile"
+        entitlements="$out/app-store.entitlements"
+        cp packaging/macos/app-store.entitlements "$entitlements"
+        /usr/libexec/PlistBuddy \
+            -c "Add :com.apple.application-identifier string $app_id" \
+            -c "Add :com.apple.developer.team-identifier string $team" "$entitlements"
+        rm "$out/profile.plist"
+        # Every upload needs a build number above the last, whatever the version, so it is the
+        # time of the build.
+        plutil -replace CFBundleVersion -string "$(date -u +%Y%m%d%H%M)" \
+            "$app/Contents/Info.plist"
+    else
+        identity=${MIDI_HARBOR_SIGNING_IDENTITY:--}
+    fi
+
+    # Sign.
     plutil -lint "$app/Contents/Info.plist" >/dev/null
     codesign --force --options runtime --sign "$identity" \
         --entitlements packaging/macos/helper.entitlements \
         "$app/Contents/MacOS/midi-harbor-daemon"
-    codesign --force --options runtime --sign "$identity" \
-        --entitlements packaging/macos/app-store.entitlements "$app"
+    codesign --force --options runtime --sign "$identity" --entitlements "$entitlements" "$app"
     codesign --verify --strict "$app"
     echo "$app"
+
+    # Package for App Store Connect.
+    if [ -f "$profile" ]; then
+        pkg="$out/Midi-Harbor-$version.pkg"
+        productbuild --quiet --component "$app" /Applications --sign "$installer" "$pkg"
+        echo "$pkg"
+    fi
     exit 0
 fi
 

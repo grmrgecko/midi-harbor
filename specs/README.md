@@ -26,6 +26,7 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 | [013-windows-support](013-windows-support/spec.md) | Windows as a first-class platform |
 | [014-mac-app-store-mode](014-mac-app-store-mode/spec.md) | The sandboxed App Store build, run from the menu bar |
 | [015-mac-menus](015-mac-menus/spec.md) | The menus on macOS: File, Edit, View, Window and Help |
+| [016-app-store-submission](016-app-store-submission/spec.md) | Building the package App Store Connect takes |
 
 ## Where each number is
 
@@ -128,6 +129,13 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 - **Success criteria**: SC-U01
 - **Research**: R-102
 - **Tasks**: T244
+
+### 016-app-store-submission
+
+- **Requirements**: FR-S01, FR-S02, FR-S03
+- **Success criteria**: SC-S01
+- **Research**: R-103
+- **Tasks**: T245
 
 ## Earlier names
 
