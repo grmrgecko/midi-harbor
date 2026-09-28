@@ -36,6 +36,13 @@ owner rewrites history before publishing and the count would fall.
 used for hashing and random numbers, which are exempt. `ITSAppUsesNonExemptEncryption` is false,
 so App Store Connect does not ask at every upload.
 
+**Extended attributes are stripped before signing.** The first upload was refused with error
+91109: `Contents/embedded.provisionprofile` carried `com.apple.quarantine`, which the browser set
+on the downloaded profile and `cp` kept. `xattr -cr` on the app before signing removes it and
+anything else a copied file brings. `com.apple.provenance` stays on every file, since macOS
+sets it on whatever an app writes and it cannot be cleared; App Store Connect's check names only
+quarantine.
+
 **Evidence**, `make appstore` on the development Mac:
 
 - `lipo -archs`: `x86_64 arm64` for both executables, once `x86_64-apple-darwin` was installed.
@@ -48,4 +55,5 @@ so App Store Connect does not ask at every upload.
   (8XMLMKNPUT)", which it reports as a development certificate, as it does every App Store
   installer certificate.
 
-**Not checked**: App Store Connect's own validation, which runs on upload.
+**Not checked**: an upload after the quarantine fix; the expanded package carries no attribute but
+`com.apple.provenance`.

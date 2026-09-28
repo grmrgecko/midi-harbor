@@ -102,7 +102,9 @@ if [ -n "$helper" ]; then
         identity=${MIDI_HARBOR_SIGNING_IDENTITY:--}
     fi
 
-    # Sign.
+    # Sign, with no extended attributes: App Store Connect refuses a package holding a file
+    # marked with com.apple.quarantine, as a downloaded profile is (research R-103).
+    xattr -cr "$app"
     plutil -lint "$app/Contents/Info.plist" >/dev/null
     codesign --force --options runtime --sign "$identity" \
         --entitlements packaging/macos/helper.entitlements \
