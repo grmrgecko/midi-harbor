@@ -1,0 +1,49 @@
+[package]
+name = "midi-harbor-fuzz"
+description = "cargo-fuzz targets for every parser that reads bytes from a peer"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace, because libFuzzer needs a nightly compiler and sanitizer flags that must not
+# leak into the gates the real workspace runs on stable. None of those gates builds these targets,
+# so after changing a parser, or any API a target calls, run from this directory:
+#
+#   cargo +nightly fuzz build
+#   cargo +nightly fuzz run blemidi_codec -- -max_total_time=300
+#
+# and likewise rtpmidi_packet and rtpmidi_journal. Leave -rss_limit_mb at its default: libFuzzer
+# itself settles near 480 MB here, so a lower limit reports an out-of-memory no input caused.
+[workspace]
+members = ["."]
+
+[dependencies]
+allocation-counter = "0.8"
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+midi-harbor-blemidi = { path = "../crates/blemidi" }
+midi-harbor-core = { path = "../crates/core" }
+midi-harbor-rtpmidi = { path = "../crates/rtpmidi" }
+
+[[bin]]
+name = "blemidi_codec"
+path = "fuzz_targets/blemidi_codec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtpmidi_packet"
+path = "fuzz_targets/rtpmidi_packet.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtpmidi_journal"
+path = "fuzz_targets/rtpmidi_journal.rs"
+test = false
+doc = false
+bench = false

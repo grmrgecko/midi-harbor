@@ -1,0 +1,38 @@
+# Datagrams rtpmidid sent, recorded against a Midi Harbor session on a Mac, with rtpmidid built
+# from its main branch at 7f552d2 on Arch Linux (R-071). One per line, as hex. A line names what
+# the datagram is, then the bytes.
+# Machine names in the session packets are replaced with generic ones; nothing else is changed.
+
+# rtpmidid answering our invitation: its acceptance on each port, its answer to our clock
+# exchange, feedback, and what was played into it. Its feedback carries the sequence number in
+# the lower half, and the number is our journal's checkpoint, 0x4711.
+accepted ffff4f4b000000022a4e4710000033254c696e75782072747000
+accepted ffff4f4b000000022a4e4710000033254c696e75782072747000
+clock-answer ffff434b000033250100000000000000000120d800000000000000570000000000000000
+feedback ffff52530000332500004711
+midi 8061958500017e3b0000332503903064
+midi 806195860001882d0000332503803040
+midi 80619587000192150000332503903264
+midi 8061958800019c020000332503b0075a
+midi 806195890001a5eb0000332502c30c
+midi 8061958a0001afd50000332503e00060
+midi 8061958b0001b9c00000332503803240
+midi 8061958c0001c3a90000332506f07e7f0601f7
+
+# rtpmidid inviting us, from ports it picked: its invitation on each port, named after the ALSA
+# client that asked for the connection, the clock exchange it opens and closes, its answer to
+# ours, feedback, what was played into it, and its goodbye on each port when that client went.
+invited ffff494e00000002ca4938fb000085226173657164756d7000
+invited ffff494e00000002ca4938fb000085226173657164756d7000
+clock-open ffff434b0000852200000000000000000000005f00000000000000000000000000000000
+clock-close ffff434b0000852202000000000000000000005f000000000007ef720000000000000093
+clock-answer ffff434b000085220100000000000000000800be00000000000012040000000000000000
+feedback ffff5253000085220000fb8f
+midi 806195fe000098de0000852203903464
+midi 806195ff0000a2c40000852203803440
+midi 806196000000acb60000852203b0407f
+midi 806196010000b6a40000852203b04000
+midi 806196020000c08b0000852203e00020
+midi 806196030000ca6c0000852206f07e7f0602f7
+ended ffff425900000002ca4938fb00008522
+ended ffff425900000002ca4938fb00008522

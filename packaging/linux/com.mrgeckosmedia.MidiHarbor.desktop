@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Midi Harbor
+Comment=Virtual MIDI ports, hardware, network sessions and Bluetooth MIDI that reconnect by themselves
+Exec=midi-harbor gui
+Icon=com.mrgeckosmedia.MidiHarbor
+StartupWMClass=com.mrgeckosmedia.MidiHarbor
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=MIDI;RTP-MIDI;Network MIDI;Bluetooth;

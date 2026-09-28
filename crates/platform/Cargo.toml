@@ -1,0 +1,49 @@
+[package]
+name = "midi-harbor-platform"
+description = "Platform seams for MIDI, Bluetooth, and system events"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+midi-harbor-blemidi.workspace = true
+midi-harbor-core.workspace = true
+btleplug = "0.13"
+if-addrs.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+
+[target.'cfg(not(windows))'.dependencies]
+zeroconf.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+windows-collections = { workspace = true }
+windows-core = { workspace = true }
+windows-sys = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ble-peripheral-rust = "0.2"
+# The version btleplug already uses, for the one query it does not expose.
+objc2-core-bluetooth = { version = "0.3.2", default-features = false, features = ["std", "CBManager"] }
+# The menus, and the App Store build's menu bar item, Dock icon and login item, at the versions winit
+# already builds (research R-098).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSThread", "NSObject", "NSError", "NSAppleEventDescriptor", "NSAppleEventManager", "NSData", "NSNotification", "NSURL", "NSGeometry"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSMenu", "NSMenuItem", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSButton", "NSControl", "NSView", "NSImage", "NSRunningApplication", "NSWindow", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSWorkspace", "objc2-core-foundation"] }
+objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
+coremidi = "0.9"
+coremidi-sys = "3.2"
+core-foundation-sys = "0.8"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = "0.12"
+dbus = "0.9"
+bluer = { version = "0.17", features = ["bluetoothd"] }

@@ -1,0 +1,12 @@
+[package]
+name = "midi2-bindings"
+description = "Generates the Windows MIDI Services bindings in the platform crate"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+windows-bindgen = "=0.64.0"
+
+# A tool of its own, not a member of the project's workspace.
+[workspace]

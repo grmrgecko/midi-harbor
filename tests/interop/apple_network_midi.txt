@@ -1,0 +1,17 @@
+# Datagrams Apple's Network MIDI sent, recorded on macOS 15 against "Session 1" (R-065).
+# One per line, as hex. A line names what the datagram is, then the bytes.
+# Machine names in the session packets are replaced with generic ones; nothing else is changed.
+
+# Control.
+accepted ffff4f4b000000024a9a7a676e6b31fe53747564696f204d61632028322900
+rejected ffff4e4f00000002514f00260488a131
+ended ffff425900000002000000000488a131
+clock-answer ffff434b6e6b31fe010000000000000000001a46000000000000f23c0000000000000000
+clock-open ffff434b6e6b31fe000000000000000000011c6800000000000000000000000000000000
+clock-close ffff434b6e6b31fe020000000000000000011c6800000000000044730000000000011c69
+
+# MIDI: note on 60, 62 and 64 at velocity 64. The first has no journal; the other two carry
+# Chapter N for the notes before them.
+midi 8061d492009951940488a13103903c40
+midi 8061d49300995d970488a13143903e4020d49200070881f13c40
+midi 8061d494009969b70488a1314390404020d49200090882f1bc403e40

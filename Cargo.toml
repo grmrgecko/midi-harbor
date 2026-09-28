@@ -1,0 +1,140 @@
+[package]
+name = "midi-harbor"
+description = "Resilient MIDI connectivity manager for macOS, Linux and Windows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "midi-harbor"
+path = "src/main.rs"
+
+[features]
+default = ["gui"]
+# gui is the only gate on libcosmic. Disabling it must drop the entire graphical
+# dependency tree, which is why the GUI lives in its own optional crate (FR-039b).
+gui = ["dep:midi-harbor-gui"]
+
+[dependencies]
+clap.workspace = true
+midi-harbor-cli.workspace = true
+midi-harbor-core.workspace = true
+midi-harbor-daemon.workspace = true
+jiff.workspace = true
+midi-harbor-gui = { workspace = true, optional = true }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+midi-harbor-platform.workspace = true
+midi-harbor-service.workspace = true
+
+[dev-dependencies]
+midi-harbor-rtpmidi.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+embed-resource = "3"
+
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+# The release version is in VERSION. The crates are never published, so theirs stays 0.0.0.
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+
+[workspace.dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
+midi-harbor-blemidi = { path = "crates/blemidi" }
+midi-harbor-cli = { path = "crates/cli" }
+midi-harbor-core = { path = "crates/core" }
+midi-harbor-daemon = { path = "crates/daemon" }
+midi-harbor-gui = { path = "crates/gui" }
+midi-harbor-ipc = { path = "crates/ipc" }
+midi-harbor-platform = { path = "crates/platform" }
+midi-harbor-rtpmidi = { path = "crates/rtpmidi" }
+midi-harbor-service = { path = "crates/service" }
+
+bytes = "1"
+clap = { version = "4.6", features = ["derive"] }
+directories = "6.0"
+gethostname = "1.1"
+if-addrs = "0.15"
+jiff = { version = "0.2", features = ["serde"] }
+mdns-sd = "0.21"
+rand = "0.10"
+rtrb = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+socket2 = "0.6"
+prost = "0.14"
+prost-types = "0.14"
+protoc-bin-vendored = "3.2"
+tonic = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+tower = "0.5"
+hyper-util = "0.1"
+thiserror = "2.0"
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "signal"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+serde_yaml_ng = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zeroconf = "0.18"
+# The WinRT side of Windows: Windows MIDI Services' API, through generated bindings in the
+# platform crate. The versions btleplug already uses.
+windows = { version = "0.62", features = ["Foundation", "Data_Json"] }
+windows-collections = "0.3"
+windows-core = "0.62"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_Multimedia",
+    "Win32_NetworkManagement_Dns",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Power",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_Memory",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_UI_WindowsAndMessaging",
+] }
+uuid = { version = "1.26", features = ["v4", "v5", "serde"] }
+
+proptest = "1.11"
+
+[workspace.lints.clippy]
+# Library code never panics, per AGENTS.md. Tests opt out with #[allow].
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+integer_division = "warn"
+
+# btleplug 0.13.2 panics on macOS when CoreBluetooth rediscovers a peripheral's services with no
+# request pending, which a BlueZ peripheral triggers (research R-058). The fix is proposed
+# upstream as deviceplug/btleplug#479; drop this once a release includes it.
+[patch.crates-io]
+btleplug = { git = "https://github.com/grmrgecko/btleplug", rev = "3a9da4bd65697593d127c124cf332b835d240802" }
+
+# Dependencies build without debug info in dev and test builds. Each of the workspace's test
+# binaries otherwise links libcosmic's debug info, which made relinking after a one-line change
+# take about two minutes on the development Mac instead of about ten seconds. The workspace's own
+# crates keep full debug info, so backtraces and debugging in this code are unchanged.
+[profile.dev.package."*"]
+debug = false

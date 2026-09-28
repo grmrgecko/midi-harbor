@@ -1,0 +1,36 @@
+[package]
+name = "midi-harbor-daemon"
+description = "The engine that owns every endpoint and connection"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json.workspace = true
+gethostname.workspace = true
+rand.workspace = true
+socket2.workspace = true
+mdns-sd.workspace = true
+if-addrs.workspace = true
+midi-harbor-blemidi.workspace = true
+midi-harbor-core.workspace = true
+midi-harbor-ipc.workspace = true
+midi-harbor-platform.workspace = true
+midi-harbor-rtpmidi.workspace = true
+midi-harbor-service.workspace = true
+jiff.workspace = true
+rtrb.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+prost-types.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+midi-harbor-platform.workspace = true
+uuid.workspace = true

@@ -1,0 +1,17 @@
+/target
+**/*.rs.bk
+*.pdb
+.DS_Store
+/dist
+.release-env
+
+# The contributor guide and the project's Claude Code skills are published, whatever a global
+# ignore file says. The rest of .claude/ stays local; git cannot re-include a path inside an
+# ignored directory, so the directory is re-included and everything but skills/ ignored again.
+!/AGENTS.md
+!/.claude/
+/.claude/*
+!/.claude/skills/
+
+# Developer ID certificate and notary key, which packaging/macos/bundle.sh finds on its own.
+/.signing

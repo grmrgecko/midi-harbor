@@ -1,0 +1,859 @@
+// The contract between the Midi Harbor daemon and its clients.
+//
+// This file is the contract. Changing it is a contract change whether or not any Rust signature
+// moves. The version lives in the package name: a breaking change means midiharbor.v2, never a
+// reinterpreted field. Field numbers are never reused; removed ones are reserved.
+
+syntax = "proto3";
+
+package midiharbor.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Owns every endpoint and connection. Clients reach it over a Unix domain socket, or a named pipe
+// on Windows.
+service Harbor {
+  // Identity and health.
+  rpc GetServerInfo(GetServerInfoRequest) returns (ServerInfo);
+  rpc GetStatus(GetStatusRequest) returns (StatusSummary);
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+  // Stops the daemon through its graceful shutdown, as SIGTERM or `service stop` does: held notes
+  // are released and sessions ended. Added in 1.1 for the App Store app, whose sandbox forbids
+  // signalling a daemon an earlier instance of the app started.
+  rpc StopDaemon(StopDaemonRequest) returns (StopDaemonResponse);
+
+  // Queries.
+  rpc ListEndpoints(ListEndpointsRequest) returns (ListEndpointsResponse);
+  rpc GetEndpoint(GetEndpointRequest) returns (Endpoint);
+  rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse);
+  rpc ListPeers(ListPeersRequest) returns (ListPeersResponse);
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+
+  // Virtual ports.
+  rpc CreateVirtualPort(CreateVirtualPortRequest) returns (Endpoint);
+  // Changes how many MIDI In and MIDI Out connectors a virtual port has. Routes on connectors
+  // it no longer has are removed, and the port is reopened.
+  rpc SetVirtualPortConnectors(SetVirtualPortConnectorsRequest) returns (Endpoint);
+  rpc RenameEndpoint(RenameEndpointRequest) returns (Endpoint);
+  rpc DeleteVirtualPort(DeleteVirtualPortRequest) returns (DeleteVirtualPortResponse);
+  rpc SetEndpointEnabled(SetEndpointEnabledRequest) returns (Endpoint);
+  // Sends one note out of an endpoint, the note-on now and its note-off after length_ms, for
+  // testing what listens there. The daemon sends the note-off itself, so a client that goes away
+  // cannot leave the note sounding. Added in 1.2.
+  rpc SendTestNote(SendTestNoteRequest) returns (SendTestNoteResponse);
+  // Clears the warning that the MIDI service stopped, for every client, once someone has seen it.
+  // Added in 1.2.
+  rpc DismissMidiServerWarning(DismissMidiServerWarningRequest) returns (DismissMidiServerWarningResponse);
+
+  // Network sessions.
+  rpc CreateNetworkSession(CreateNetworkSessionRequest) returns (Endpoint);
+  rpc ConnectPeer(ConnectPeerRequest) returns (Endpoint);
+  rpc DisconnectPeer(DisconnectPeerRequest) returns (Endpoint);
+  // Ends one machine's part in a network port, leaving the others connected.
+  rpc DisconnectMachine(DisconnectMachineRequest) returns (Endpoint);
+  rpc AddManualPeer(AddManualPeerRequest) returns (Peer);
+  rpc RemovePeer(RemovePeerRequest) returns (RemovePeerResponse);
+  // Switches whether a known machine is let in without asking.
+  rpc SetPeerTrusted(SetPeerTrustedRequest) returns (Peer);
+  rpc RespondToInvitation(RespondToInvitationRequest) returns (RespondToInvitationResponse);
+  rpc SetInvitationPolicy(SetInvitationPolicyRequest) returns (Endpoint);
+  // Deletes a network port, stopping what it carried first.
+  rpc DeleteNetworkPort(DeleteNetworkPortRequest) returns (DeleteNetworkPortResponse);
+  // Changes a network port's settings. A field left unset is left as it is.
+  rpc UpdateNetworkPort(UpdateNetworkPortRequest) returns (Endpoint);
+
+  // Physical devices are discovered, never created, so there is no create call.
+  rpc ForgetPhysicalDevice(ForgetPhysicalDeviceRequest) returns (ForgetPhysicalDeviceResponse);
+  rpc ResolveAmbiguousDevice(ResolveAmbiguousDeviceRequest) returns (Endpoint);
+
+  // Bluetooth.
+  rpc StartBluetoothScan(StartBluetoothScanRequest) returns (StartBluetoothScanResponse);
+  rpc StopBluetoothScan(StopBluetoothScanRequest) returns (StopBluetoothScanResponse);
+  rpc ConnectBluetoothDevice(ConnectBluetoothDeviceRequest) returns (Endpoint);
+  rpc DisconnectBluetoothDevice(DisconnectBluetoothDeviceRequest) returns (Endpoint);
+  rpc ForgetBluetoothDevice(ForgetBluetoothDeviceRequest) returns (ForgetBluetoothDeviceResponse);
+  rpc SetPeripheralAdvertising(SetPeripheralAdvertisingRequest) returns (SetPeripheralAdvertisingResponse);
+  // What the radio can see right now, which is not the same as what is configured. Reported
+  // separately from endpoints on purpose: an entry per peripheral in range would write the
+  // neighbourhood into the user's configuration file.
+  rpc ListBluetoothDevices(ListBluetoothDevicesRequest) returns (ListBluetoothDevicesResponse);
+
+  // Routes, which are the MIDI connections between endpoints.
+  rpc CreateRoute(CreateRouteRequest) returns (CreateRouteResponse);
+  // Changes a route's ends, connectors and whether it carries MIDI both ways, keeping whether it
+  // is switched on. Its id changes when its ends do.
+  rpc UpdateRoute(UpdateRouteRequest) returns (UpdateRouteResponse);
+  rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);
+  rpc SetRouteEnabled(SetRouteEnabledRequest) returns (Route);
+
+  // Configuration.
+  rpc ExportConfiguration(ExportConfigurationRequest) returns (ExportConfigurationResponse);
+  rpc ImportConfiguration(ImportConfigurationRequest) returns (ImportConfigurationResponse);
+  rpc ReloadConfiguration(ReloadConfigurationRequest) returns (ReloadConfigurationResponse);
+  rpc ExportDiagnostics(ExportDiagnosticsRequest) returns (ExportDiagnosticsResponse);
+  // Reads Apple's own MIDI setup for a one-time import. Read by the daemon so that no client
+  // queries CoreMIDI itself.
+  rpc ReadAppleSetup(ReadAppleSetupRequest) returns (ReadAppleSetupResponse);
+
+  // Streams. WatchState, WatchEvents and WatchInvitations are lossless; a client that falls
+  // behind on them is disconnected with RESOURCE_EXHAUSTED rather than shown a diverging view.
+  rpc WatchState(WatchStateRequest) returns (stream StateEvent);
+  rpc WatchEvents(WatchEventsRequest) returns (stream Event);
+  rpc WatchInvitations(WatchInvitationsRequest) returns (stream Invitation);
+
+  // WatchTraffic and MonitorEndpoint are lossy by contract. HTTP/2 flow control would otherwise
+  // let a stalled client apply backpressure toward the MIDI data path, which the real-time rules
+  // forbid. Updates are dropped and counted instead of awaiting capacity.
+  rpc WatchTraffic(WatchTrafficRequest) returns (stream TrafficUpdate);
+  rpc MonitorEndpoint(MonitorEndpointRequest) returns (stream MonitoredMessage);
+}
+
+// ---------------------------------------------------------------------------
+// Shared enumerations
+// ---------------------------------------------------------------------------
+
+// What kind of thing an endpoint is.
+enum EndpointKind {
+  ENDPOINT_KIND_UNSPECIFIED = 0;
+  ENDPOINT_KIND_VIRTUAL_PORT = 1;
+  ENDPOINT_KIND_PHYSICAL_DEVICE = 2;
+  ENDPOINT_KIND_NETWORK_SESSION = 3;
+  ENDPOINT_KIND_BLUETOOTH_DEVICE = 4;
+}
+
+// Which way MIDI can travel through an endpoint.
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_INPUT = 1;
+  DIRECTION_OUTPUT = 2;
+  DIRECTION_BIDIRECTIONAL = 3;
+}
+
+// Where a connection sits in its lifecycle.
+enum ConnectionPhase {
+  CONNECTION_PHASE_UNSPECIFIED = 0;
+  // Switched off by the user. The only phase that stays put on its own.
+  CONNECTION_PHASE_DISABLED = 1;
+  CONNECTION_PHASE_DISCONNECTED = 2;
+  CONNECTION_PHASE_CONNECTING = 3;
+  CONNECTION_PHASE_CONNECTED = 4;
+  // Down for a reason the user cannot act on, waiting out a backoff delay.
+  CONNECTION_PHASE_RETRYING = 5;
+  // Down for a reason the user can act on. Still retried, and re-evaluated every attempt.
+  CONNECTION_PHASE_UNAVAILABLE = 6;
+}
+
+// How a session treats incoming invitations.
+enum InvitationPolicy {
+  INVITATION_POLICY_UNSPECIFIED = 0;
+  INVITATION_POLICY_PROMPT = 1;
+  INVITATION_POLICY_ACCEPT_KNOWN = 2;
+  INVITATION_POLICY_ACCEPT_ALL = 3;
+  INVITATION_POLICY_REJECT_ALL = 4;
+}
+
+// Whether a route can currently deliver.
+enum RouteValidity {
+  ROUTE_VALIDITY_UNSPECIFIED = 0;
+  ROUTE_VALIDITY_VALID = 1;
+  // One or both endpoints are missing; the route is kept so it can resume when they return.
+  ROUTE_VALIDITY_BROKEN = 2;
+  // The route takes part in a cycle. Creation is still allowed, but the user is warned.
+  ROUTE_VALIDITY_LOOP_DETECTED = 3;
+  // Both endpoints exist, but one is not running, so nothing can pass. The configuration is
+  // intact and delivery resumes when it is available again.
+  ROUTE_VALIDITY_SUSPENDED = 4;
+}
+
+// How confidently stored hardware was matched to something attached.
+enum MatchConfidence {
+  MATCH_CONFIDENCE_UNSPECIFIED = 0;
+  MATCH_CONFIDENCE_NONE = 1;
+  // Never rebinds a route on its own: binding the wrong hardware is worse than asking.
+  MATCH_CONFIDENCE_AMBIGUOUS = 2;
+  MATCH_CONFIDENCE_PROBABLE = 3;
+  MATCH_CONFIDENCE_EXACT = 4;
+}
+
+// How much attention an event deserves.
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_INFO = 1;
+  SEVERITY_WARNING = 2;
+  SEVERITY_ERROR = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Core messages
+// ---------------------------------------------------------------------------
+
+// Identifies which build and contract version the daemon serves.
+message ServerInfo {
+  string daemon_version = 1;
+  uint32 protocol_major = 2;
+  uint32 protocol_minor = 3;
+  google.protobuf.Timestamp started_at = 4;
+  string config_path = 5;
+  string socket_path = 6;
+}
+
+// Why a connection is not usable. The slug is the stable value clients switch on.
+message FailureReason {
+  // Stable machine-readable slug, such as name_conflict or permission_denied.
+  string code = 1;
+  // Human-readable description. May change between releases; never switch on it.
+  string message = 2;
+  // What the user can do about it, when there is anything.
+  string guidance = 3;
+  // Whether clearing this requires the user to act.
+  bool needs_user_action = 4;
+}
+
+// The lifecycle position of one endpoint, with the history needed to explain it.
+message ConnectionState {
+  ConnectionPhase phase = 1;
+  google.protobuf.Timestamp since = 2;
+  // Retained after recovery, so a user can see what happened while they were not watching.
+  FailureReason last_error = 3;
+  uint32 attempt = 4;
+  google.protobuf.Timestamp next_retry = 5;
+  // Set while the link keeps connecting and dropping again within seconds. Its retries are
+  // spaced out regardless; this says why it keeps going quiet.
+  bool unstable = 6;
+  // Set while a network session has no network to reach its peer by: the machine has no route
+  // there at all, as opposed to a peer that is not answering.
+  bool waiting_for_network = 7;
+}
+
+// Live traffic counts for one endpoint or route.
+message TrafficCounters {
+  uint64 messages_sent = 1;
+  uint64 messages_received = 2;
+  uint64 bytes_sent = 3;
+  uint64 bytes_received = 4;
+  // Lost by the network, detected as a gap in sequence numbers.
+  uint64 messages_lost = 5;
+  // Rebuilt from the recovery journal.
+  uint64 messages_recovered = 6;
+  // Discarded by our own backpressure, kept distinct from network loss on purpose.
+  uint64 messages_dropped = 7;
+  google.protobuf.Timestamp last_activity = 8;
+  // Bluetooth MIDI packets from the device that could not be decoded and were discarded whole.
+  uint64 packets_malformed = 9;
+  // When a message was last received, and last sent, apart because last_activity cannot say
+  // which way traffic went.
+  google.protobuf.Timestamp last_received = 10;
+  google.protobuf.Timestamp last_sent = 11;
+}
+
+// The values used to recognise one piece of hardware again after it is replugged.
+message DeviceFingerprint {
+  optional uint32 unique_id = 1;
+  optional string usb_serial = 2;
+  optional string manufacturer = 3;
+  optional string model = 4;
+  // Always present, never sufficient on its own.
+  string name = 5;
+  optional string topology_path = 6;
+}
+
+message VirtualPortDetail {
+  // The first MIDI Out connector's platform identifier.
+  optional uint32 platform_unique_id = 1;
+  // MIDI In connectors, which other applications send to: one to sixteen.
+  uint32 inputs = 2;
+  // MIDI Out connectors, which other applications receive from: one to sixteen.
+  uint32 outputs = 3;
+}
+
+message PhysicalDeviceDetail {
+  DeviceFingerprint fingerprint = 1;
+  bool present = 2;
+  MatchConfidence confidence = 3;
+  // Names the application holding the device exclusively, when one does.
+  optional string claimed_by = 4;
+  // Another application's port, or one macOS makes itself such as an IAC bus or an Apple
+  // network session, rather than hardware.
+  bool software = 5;
+}
+
+message NetworkSessionDetail {
+  string local_name = 1;
+  // The data port is always this plus one.
+  uint32 control_port = 2;
+  optional string peer_id = 3;
+  InvitationPolicy invitation_policy = 4;
+  // Time since the last successful clock exchange, the authoritative liveness signal.
+  optional uint64 last_sync_age_ms = 5;
+  optional int64 clock_offset_ns = 6;
+  optional uint64 round_trip_us = 7;
+  // Machines carried beside the peer, having invited the session while it already had one, by
+  // the name each advertises or its address.
+  repeated string guests = 8;
+  // Whether other applications on this computer see it as a MIDI port of its name, joined to it
+  // both ways.
+  bool automatic_port = 9;
+  // Every machine taking part, the peer first.
+  repeated NetworkMachine machines = 10;
+  // The automatic port's traffic, while it is open: received is what other applications sent
+  // it, sent is what it passed on to them.
+  TrafficCounters automatic_port_counters = 11;
+}
+
+// One machine taking part in a network port.
+message NetworkMachine {
+  // Its control address, host:port.
+  string address = 1;
+  // The name it advertises, once known.
+  optional string name = 2;
+  // Whether this side connected to it, rather than it to this side.
+  bool invited = 3;
+  // Whether it has finished joining and is carrying MIDI.
+  bool joined = 4;
+  // The most recent round trip to it, once measured.
+  optional uint64 round_trip_us = 5;
+}
+
+message BluetoothDeviceDetail {
+  string address = 1;
+  bool paired = 2;
+  optional int32 rssi = 3;
+  // True when this device connected to us rather than us connecting to it.
+  bool peripheral_role = 4;
+}
+
+// Anything MIDI can flow to or from.
+message Endpoint {
+  string id = 1;
+  string name = 2;
+  EndpointKind kind = 3;
+  bool enabled = 4;
+  Direction direction = 5;
+  ConnectionState state = 6;
+  TrafficCounters counters = 7;
+
+  oneof detail {
+    VirtualPortDetail virtual_port = 8;
+    PhysicalDeviceDetail physical_device = 9;
+    NetworkSessionDetail network_session = 10;
+    BluetoothDeviceDetail bluetooth_device = 11;
+  }
+}
+
+// A MIDI connection between two endpoints.
+message Route {
+  string id = 1;
+  string from_name = 2;
+  string to_name = 3;
+  optional string from_id = 4;
+  optional string to_id = 5;
+  bool enabled = 6;
+  RouteValidity validity = 7;
+  // Populated when validity is BROKEN: the endpoint names that matched nothing.
+  repeated string missing = 8;
+  // Populated when validity is LOOP_DETECTED: the route ids forming the cycle.
+  repeated string cycle = 9;
+  TrafficCounters counters = 10;
+  // Populated when validity is SUSPENDED: the endpoints that exist but are not running.
+  repeated string waiting_on = 11;
+  // Which of the source's MIDI In connectors the route starts from, counting from one.
+  uint32 from_connector = 12;
+  // Which of the destination's MIDI Out connectors the route ends at, counting from one.
+  uint32 to_connector = 13;
+  // Whether it also carries MIDI back, from the destination's MIDI In to_connector to the
+  // source's MIDI Out from_connector.
+  bool both_ways = 14;
+}
+
+// A discovered or manually added remote party.
+message Peer {
+  string id = 1;
+  string advertised_name = 2;
+  repeated string addresses = 3;
+  bool discovered = 4;
+  bool trusted = 5;
+  google.protobuf.Timestamp last_seen = 6;
+}
+
+// Whether one capability is available, and why not when it is not.
+message Capability {
+  // Readable, such as "bluetooth connections", and may be reworded.
+  string name = 1;
+  bool available = 2;
+  string reason = 3;
+  // Stable, such as "bluetooth_central", for clients choosing what to show.
+  string id = 4;
+}
+
+// A timestamped record of something that happened.
+message Event {
+  uint64 id = 1;
+  google.protobuf.Timestamp at = 2;
+  optional string endpoint_id = 3;
+  optional string route_id = 4;
+  Severity severity = 5;
+  // Stable machine-readable name, such as endpoint_state_changed.
+  string kind = 6;
+  string detail = 7;
+}
+
+// A peer asking to establish a session with this machine.
+message Invitation {
+  string invitation_id = 1;
+  string session_endpoint_id = 2;
+  string peer_name = 3;
+  string peer_address = 4;
+  google.protobuf.Timestamp received_at = 5;
+  bool peer_known = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Requests and responses
+// ---------------------------------------------------------------------------
+
+message GetServerInfoRequest {}
+
+message GetStatusRequest {}
+
+message StopDaemonRequest {}
+
+message StopDaemonResponse {}
+
+message StatusSummary {
+  ServerInfo server = 1;
+  uint32 endpoint_count = 2;
+  uint32 connected_count = 3;
+  uint32 route_count = 4;
+  uint32 broken_route_count = 5;
+  // When the platform's MIDI service was found gone, while the warning about it stands: set by the
+  // daemon that replaced the one that lost it, and cleared by DismissMidiServerWarning. Other
+  // applications that were using MIDI may have lost it with the service, which the daemon cannot
+  // see or mend.
+  google.protobuf.Timestamp midi_server_replaced_at = 6;
+}
+
+message GetCapabilitiesRequest {}
+
+message GetCapabilitiesResponse {
+  repeated Capability capabilities = 1;
+}
+
+message ListEndpointsRequest {
+  // Restricts the listing to one kind when set.
+  optional EndpointKind kind = 1;
+  // Includes remembered hardware that is currently unplugged.
+  bool include_absent = 2;
+}
+
+message ListEndpointsResponse {
+  repeated Endpoint endpoints = 1;
+}
+
+message GetEndpointRequest {
+  string id = 1;
+}
+
+message ListRoutesRequest {
+  bool only_broken = 1;
+}
+
+message ListRoutesResponse {
+  repeated Route routes = 1;
+}
+
+message ListPeersRequest {}
+
+message ListPeersResponse {
+  repeated Peer peers = 1;
+}
+
+message ListEventsRequest {
+  // Returns only events newer than this identifier.
+  optional uint64 after_id = 1;
+  uint32 limit = 2;
+  optional string endpoint_id = 3;
+}
+
+message ListEventsResponse {
+  repeated Event events = 1;
+}
+
+message CreateVirtualPortRequest {
+  string name = 1;
+  // Not used: a virtual port always carries MIDI both ways, as MIDI In and MIDI Out connectors.
+  Direction direction = 2;
+  // MIDI In connectors, one to sixteen. Zero means one.
+  uint32 inputs = 3;
+  // MIDI Out connectors, one to sixteen. Zero means one.
+  uint32 outputs = 4;
+}
+
+message SetVirtualPortConnectorsRequest {
+  // The port, by name or identifier.
+  string id = 1;
+  // MIDI In connectors, one to sixteen.
+  uint32 inputs = 2;
+  // MIDI Out connectors, one to sixteen.
+  uint32 outputs = 3;
+}
+
+message RenameEndpointRequest {
+  string id = 1;
+  string new_name = 2;
+  // Without this, the call fails FAILED_PRECONDITION and reports which applications may need to
+  // reselect the port. Renaming also rewrites every route that names this endpoint.
+  bool confirm = 3;
+}
+
+message DeleteVirtualPortRequest {
+  string id = 1;
+}
+
+message DeleteNetworkPortRequest {
+  // The network port, by name or identifier.
+  string id = 1;
+}
+
+message DeleteNetworkPortResponse {
+  // Routes that referenced the deleted network port and are now broken.
+  repeated string orphaned_routes = 1;
+}
+
+message DeleteVirtualPortResponse {
+  // Routes that referenced the deleted port and are now broken.
+  repeated string orphaned_routes = 1;
+}
+
+message SetEndpointEnabledRequest {
+  string id = 1;
+  bool enabled = 2;
+}
+
+message SendTestNoteRequest {
+  // The endpoint to send out of, by name or identifier. It must be one a route could send to.
+  string endpoint_id = 1;
+  // 1 to 16.
+  uint32 channel = 2;
+  // 0 to 127; 60 is middle C.
+  uint32 note = 3;
+  // 1 to 127. Zero would be read as a note-off.
+  uint32 velocity = 4;
+  // How long the note sounds, 1 to 10000 milliseconds; 500 when unset.
+  optional uint32 length_ms = 5;
+}
+
+message SendTestNoteResponse {}
+
+message DismissMidiServerWarningRequest {}
+
+message DismissMidiServerWarningResponse {
+  // Whether there was a warning to dismiss.
+  bool dismissed = 1;
+}
+
+message CreateNetworkSessionRequest {
+  string name = 1;
+  // Zero asks the daemon to choose. The data port is always control_port plus one.
+  uint32 control_port = 2;
+  InvitationPolicy invitation_policy = 3;
+  // Whether other applications on this computer see it as a MIDI port of its name. Unset means
+  // yes.
+  optional bool automatic_port = 4;
+  // The name other machines see it by, its Bonjour name. Unset means its name.
+  optional string local_name = 5;
+}
+
+message UpdateNetworkPortRequest {
+  // The network port, by name or identifier.
+  string id = 1;
+  optional bool automatic_port = 2;
+  // The name other machines see it by. Machines already connected keep the name they were told.
+  optional string local_name = 3;
+  // The UDP port to listen on, zero to let the system choose. The network port restarts on it:
+  // a machine it connected to is connected to again, and one that connected to it needs the new
+  // port.
+  optional uint32 control_port = 4;
+  optional InvitationPolicy invitation_policy = 5;
+}
+
+message ConnectPeerRequest {
+  string session_endpoint_id = 1;
+  string peer_id = 2;
+  // Carry the machine beside those already connected, rather than in place of the peer. It is
+  // remembered and reconnected as the peer is, until it is disconnected.
+  bool alongside = 3;
+}
+
+message DisconnectMachineRequest {
+  string session_endpoint_id = 1;
+  // The machine's address, as NetworkMachine reports it.
+  string address = 2;
+}
+
+message DisconnectPeerRequest {
+  string session_endpoint_id = 1;
+}
+
+message AddManualPeerRequest {
+  string address = 1;
+  uint32 port = 2;
+  optional string name = 3;
+  // Whether it is let in without asking. Unset means yes.
+  optional bool trusted = 4;
+}
+
+message SetPeerTrustedRequest {
+  // The machine, by identifier, name or address.
+  string peer_id = 1;
+  bool trusted = 2;
+}
+
+message RemovePeerRequest {
+  string peer_id = 1;
+}
+
+message RemovePeerResponse {}
+
+message RespondToInvitationRequest {
+  string invitation_id = 1;
+  bool accept = 2;
+  // Remembers the peer as trusted, so future invitations are accepted without asking.
+  bool always = 3;
+}
+
+message RespondToInvitationResponse {}
+
+message SetInvitationPolicyRequest {
+  string session_endpoint_id = 1;
+  InvitationPolicy policy = 2;
+}
+
+message ForgetPhysicalDeviceRequest {
+  string id = 1;
+}
+
+message ForgetPhysicalDeviceResponse {
+  repeated string orphaned_routes = 1;
+  // Set when the hardware is still plugged in, so it has been listed again as something never
+  // seen before rather than disappearing.
+  bool still_attached = 2;
+}
+
+message ResolveAmbiguousDeviceRequest {
+  string id = 1;
+  // The attached hardware the user chose for this stored entry.
+  DeviceFingerprint chosen = 2;
+}
+
+message StartBluetoothScanRequest {
+  uint32 duration_seconds = 1;
+}
+
+message StartBluetoothScanResponse {}
+
+message StopBluetoothScanRequest {}
+
+message StopBluetoothScanResponse {}
+
+message ConnectBluetoothDeviceRequest {
+  string address = 1;
+}
+
+message DisconnectBluetoothDeviceRequest {
+  string id = 1;
+}
+
+message ForgetBluetoothDeviceRequest {
+  string id = 1;
+}
+
+message ForgetBluetoothDeviceResponse {}
+
+message SetPeripheralAdvertisingRequest {
+  bool enabled = 1;
+  optional string name = 2;
+}
+
+message SetPeripheralAdvertisingResponse {
+  bool advertising = 1;
+  // The name the advertisement was asked to carry, when advertising.
+  string name = 2;
+  // Whether the platform actually sends that name. macOS has room for five bytes of name beside
+  // the MIDI service and drops a longer one, so devices show the computer's own name instead.
+  bool name_sent = 3;
+}
+
+message ListBluetoothDevicesRequest {}
+
+message ListBluetoothDevicesResponse {
+  repeated DiscoveredBluetoothDevice devices = 1;
+}
+
+// A peripheral the radio can currently hear.
+message DiscoveredBluetoothDevice {
+  // The platform's own name for it, which is a hardware address on Linux and an opaque
+  // identifier on macOS. Never parsed by a client.
+  string address = 1;
+  optional string name = 2;
+  optional int32 rssi = 3;
+  bool paired = 4;
+  // Set when this device already has a configured endpoint.
+  optional string endpoint_id = 5;
+}
+
+message CreateRouteRequest {
+  // Endpoint name or identifier. Names are accepted because that is what the stored
+  // configuration uses and what a person types.
+  string from = 1;
+  string to = 2;
+  // Which of the source's MIDI In connectors, counting from one. Zero means the first.
+  uint32 from_connector = 3;
+  // Which of the destination's MIDI Out connectors, counting from one. Zero means the first.
+  uint32 to_connector = 4;
+  // Whether it also carries MIDI back through the same connector numbers the other way round.
+  bool both_ways = 5;
+}
+
+message UpdateRouteRequest {
+  // The route to change.
+  string id = 1;
+  // Endpoint name or identifier, as for CreateRoute.
+  string from = 2;
+  string to = 3;
+  uint32 from_connector = 4;
+  uint32 to_connector = 5;
+  bool both_ways = 6;
+}
+
+message UpdateRouteResponse {
+  Route route = 1;
+  // Populated when the route now completes a cycle. The change still succeeds, per FR-033.
+  repeated string loop_warning = 2;
+}
+
+message CreateRouteResponse {
+  Route route = 1;
+  // Populated when the new route completes a cycle. Creation still succeeds, per FR-033.
+  repeated string loop_warning = 2;
+}
+
+message DeleteRouteRequest {
+  string id = 1;
+}
+
+message DeleteRouteResponse {}
+
+message SetRouteEnabledRequest {
+  string id = 1;
+  bool enabled = 2;
+}
+
+message ExportConfigurationRequest {}
+
+message ExportConfigurationResponse {
+  // The YAML document, exactly as it would be written to disk.
+  string yaml = 1;
+}
+
+message ImportConfigurationRequest {
+  string yaml = 1;
+  // Replaces the whole setup rather than merging into it.
+  bool replace = 2;
+}
+
+message ImportConfigurationResponse {
+  uint32 endpoints_added = 1;
+  uint32 routes_added = 2;
+  // Connections that were disturbed because their configuration actually changed, by name.
+  repeated string restarted_endpoints = 3;
+  // Endpoints a replacing import removed, by name. A merge never removes anything.
+  repeated string removed_endpoints = 4;
+  // Settings that were accepted but only take effect when the daemon next starts.
+  repeated string pending_restart = 5;
+}
+
+message ReloadConfigurationRequest {}
+
+message ReloadConfigurationResponse {
+  // Connections that were disturbed because their configuration actually changed, by name.
+  repeated string restarted_endpoints = 1;
+  // Never set. A reload refuses a document it cannot read and leaves everything running, rather
+  // than preserving the file and starting from defaults as the daemon does at startup.
+  optional string repaired_from = 2;
+  repeated string added_endpoints = 3;
+  repeated string removed_endpoints = 4;
+  uint32 routes_added = 5;
+  // Settings that were accepted but only take effect when the daemon next starts.
+  repeated string pending_restart = 6;
+}
+
+message ReadAppleSetupRequest {}
+
+message ReadAppleSetupResponse {
+  // False on a platform with no Apple MIDI setup, when the other fields are empty.
+  bool available = 1;
+  // Whether the IAC Driver is switched on, so its buses are visible to applications now.
+  bool iac_online = 2;
+  // The IAC Driver's bus names.
+  repeated string buses = 3;
+  // The network sessions configured in Audio MIDI Setup.
+  repeated string sessions = 4;
+}
+
+message ExportDiagnosticsRequest {
+  bool include_message_log = 1;
+}
+
+message ExportDiagnosticsResponse {
+  string report = 1;
+}
+
+message WatchStateRequest {}
+
+// Something changed about the shape or state of the system.
+message StateEvent {
+  oneof change {
+    Endpoint endpoint_changed = 1;
+    Endpoint endpoint_added = 2;
+    string endpoint_removed = 3;
+    Route route_changed = 4;
+    string route_removed = 5;
+    GetCapabilitiesResponse capabilities_changed = 6;
+  }
+}
+
+message WatchEventsRequest {
+  optional uint64 after_id = 1;
+}
+
+message WatchInvitationsRequest {}
+
+message WatchTrafficRequest {
+  // Restricts updates to these endpoints. Empty means all of them.
+  repeated string endpoint_ids = 1;
+}
+
+// Coalesced counters, emitted at most every 250ms per endpoint and never per message.
+message TrafficUpdate {
+  string endpoint_id = 1;
+  TrafficCounters counters = 2;
+  // Updates discarded for this subscriber since the last message, because this stream is lossy
+  // by contract rather than applying backpressure toward the data path.
+  uint64 dropped = 3;
+}
+
+message MonitorEndpointRequest {
+  string endpoint_id = 1;
+}
+
+// One decoded MIDI message observed on an endpoint.
+message MonitoredMessage {
+  google.protobuf.Timestamp at = 1;
+  // Raw bytes, for the hex view.
+  bytes data = 2;
+  // Human-readable decoding, such as "note on ch1 C4 vel100".
+  string decoded = 3;
+  bool outbound = 4;
+  // Messages discarded for this subscriber since the last one delivered.
+  uint64 dropped = 5;
+}

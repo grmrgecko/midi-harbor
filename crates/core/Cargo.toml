@@ -1,0 +1,25 @@
+[package]
+name = "midi-harbor-core"
+description = "Domain types, connection state machine, routing and configuration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+directories.workspace = true
+jiff.workspace = true
+rand.workspace = true
+rtrb.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+serde_yaml_ng.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "midi-harbor-blemidi"
+description = "Bluetooth LE MIDI packet codec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+midi-harbor-core.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

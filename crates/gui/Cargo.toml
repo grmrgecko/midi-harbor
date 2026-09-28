@@ -1,0 +1,43 @@
+[package]
+name = "midi-harbor-gui"
+description = "libcosmic graphical interface over the daemon IPC contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+midi-harbor-core.workspace = true
+midi-harbor-ipc.workspace = true
+midi-harbor-platform.workspace = true
+midi-harbor-service.workspace = true
+jiff.workspace = true
+prost-types.workspace = true
+serde.workspace = true
+serde_yaml_ng.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+
+# libcosmic is pinned to an exact revision: upstream has no macOS CI, so bumps are
+# deliberate and re-verified by hand (research R-001).
+[target.'cfg(target_os = "macos")'.dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+rev = "87ab8179"
+default-features = false
+features = ["winit", "wgpu", "tokio", "multi-window"]
+
+[target.'cfg(target_os = "linux")'.dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+rev = "87ab8179"
+features = ["winit", "wgpu", "tokio", "multi-window", "wayland"]
+
+[target.'cfg(windows)'.dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+rev = "87ab8179"
+default-features = false
+features = ["winit", "wgpu", "tokio", "multi-window"]

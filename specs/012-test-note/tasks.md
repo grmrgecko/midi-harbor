@@ -1,0 +1,6 @@
+# Tasks: Test Note
+
+Tasks by their numbers in the project-wide sequence, which continues across every spec. Each was
+built and checked in one piece, so they are not broken into phases.
+
+- [x] T239 Send one test note out of an endpoint from the window's Monitor page and the command line, to test what listens there, such as a program that plays a cue on a note (owner request 2026-09-27), per FR-039c, FR-047 — done: a `SendTestNote` RPC (protocol 1.2) takes the endpoint, channel 1 to 16, note 0 to 127, velocity 1 to 127 and a length of 1 to 10000 ms, 500 when unset; the daemon delivers the note-on as a route would, so a monitor shows it leaving and the counters and note tracking see it, and sends the note-off itself from a task of its own so a client that goes away cannot leave it sounding. Numbers out of range are InvalidArgument; an endpoint that only sends, or one switched off or not connected, is FailedPrecondition. `midi-harbor send-note`, and on the Monitor page note, channel and velocity fields with Send note, enabled only for an endpoint a note can go out of. Contract tests check the note-on and note-off leaving a port with the client gone and a monitor seeing it, and each refusal beside the boundary accepted; removing the note-off fails the first.

@@ -1,0 +1,21 @@
+# Datagrams Apple's Network MIDI sent when it invited us, recorded on macOS 15 from "Session 1" in
+# Audio MIDI Setup's directory (R-068). One per line, as hex. A line names what the datagram is,
+# then the bytes.
+# Machine names in the session packets are replaced with generic ones; nothing else is changed.
+
+# Control: the invitation on each port, the clock exchange Apple opens and closes as initiator,
+# and receiver feedback for our packet 0xFDE5.
+invited ffff494e000000026b8b456737193c2753747564696f204d616300
+invited ffff494e000000026b8b456737193c2753747564696f204d616300
+clock-open ffff434b37193c2700000000000000000091e21a00000000000000000000000000000000
+clock-close ffff434b37193c2702000000000000000091e21a000000000091694b000000000091e21b
+feedback ffff525337193c27fde50000
+
+# MIDI: note 60, 62 and 64 on and off at velocity 64. Each note off carries Chapter N for the
+# note on before it.
+midi 8061b15c00945b5c37193c2703903c40
+midi 8061b15d0094633c37193c2743803c4020b15d00070881f13c40
+midi 8061b15e00946b1037193c2703903e40
+midi 8061b15f009472f537193c2743803e4020b15f00070881f13e40
+midi 8061b16000947af337193c2703904040
+midi 8061b161009482f737193c274380404020b16100070881f14040

@@ -1,0 +1,3 @@
+// The executable's icon, which Explorer, the Start menu, shortcuts and the taskbar show. Compiled
+// into the executable by build.rs.
+1 ICON "midi-harbor.ico"

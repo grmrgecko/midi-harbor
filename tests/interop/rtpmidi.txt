@@ -1,0 +1,33 @@
+# Datagrams rtpMIDI 1.1.14.247 sent, on Windows 11, recorded against a Midi Harbor session on a Mac
+# on another subnet (R-073). One per line, as hex. A line names what the datagram is, then the
+# bytes.
+# Machine names in the session packets are replaced with generic ones; nothing else is changed.
+
+# rtpMIDI answering our invitation: its acceptance on each port, its answer to our clock
+# exchange, feedback, and what was played into it. Its feedback carries the sequence number in
+# the upper half, as Apple's does, and its own sequence numbers start at zero.
+accepted ffff4f4b00000002dd0628a1ed5f549257494e444f57532d504300
+accepted ffff4f4b00000002dd0628a1ed5f549257494e444f57532d504300
+clock-answer ffff434bed5f549201000000000000000000c38b00000000004d157e0000000000000000
+feedback ffff5253ed5f549228a30000
+midi 80610000005cf23eed5f549203903064
+midi 80610001005cfc12ed5f549203803040
+midi 80610002005d05e5ed5f549203903264
+midi 80610003005d0fb2ed5f549203b0075a
+midi 80610004005d1982ed5f549202c30c
+midi 80610005005d234fed5f549203e00060
+midi 80610006005d2d21ed5f549203803240
+midi 80610007005d36f5ed5f549206f07e7f0601f7
+
+# rtpMIDI inviting us: its invitation on each port, the clock exchange it opens and closes, and
+# what was played into it.
+invited ffff494e00000002c12b02f5ed5f549257494e444f57532d504300
+invited ffff494e00000002c12b02f5ed5f549257494e444f57532d504300
+clock-open ffff434bed5f54920000000000000000009b444200000000000000000000000000000000
+clock-close ffff434bed5f54920200000000000000009b444200000000004ef2da00000000009b446b
+midi 8061001000a8142eed5f549203903464
+midi 8061001100a81dfbed5f549203803440
+midi 8061001200a827caed5f549203b0407f
+midi 8061001300a83198ed5f549203b04000
+midi 8061001400a83b69ed5f549203e00020
+midi 8061001500a8453fed5f549206f07e7f0602f7

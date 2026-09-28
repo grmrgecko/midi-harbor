@@ -1,0 +1,32 @@
+[package]
+name = "midi-harbor-ipc"
+description = "Generated gRPC client and server for the Midi Harbor daemon contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+midi-harbor-core.workspace = true
+hyper-util.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+tower.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+uuid.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+
+[build-dependencies]
+protoc-bin-vendored.workspace = true
+tonic-prost-build.workspace = true

@@ -1,0 +1,205 @@
+# Builds every release artifact from one machine, inside the image packaging/cross/Dockerfile
+# makes. Run it through the Makefile: `make snapshot` or `make release`.
+version: 2
+
+project_name: midi-harbor
+
+builds:
+  # The full build, with the graphical interface, for Linux and Windows.
+  - id: full
+    builder: rust
+    binary: midi-harbor
+    targets:
+      # Linux against Debian 12's glibc, the sysroots' release.
+      - x86_64-unknown-linux-gnu.2.36
+      - aarch64-unknown-linux-gnu.2.36
+      - x86_64-pc-windows-gnu
+    flags: &flags
+      - --release
+      - --locked
+      - --package=midi-harbor
+    env: &env
+      - MACOSX_DEPLOYMENT_TARGET=11.0
+      - SDKROOT=/osxcross/MacOSX.sdk
+      - PKG_CONFIG_ALLOW_CROSS=1
+      - PKG_CONFIG_SYSROOT_DIR={{ if eq .Os "linux" }}/sysroot/linux_{{ .Arch }}{{ end }}
+      - PKG_CONFIG_LIBDIR={{ if eq .Os "linux" }}/sysroot/linux_{{ .Arch }}/usr/lib/{{ if eq .Arch "amd64" }}x86_64{{ else }}aarch64{{ end }}-linux-gnu/pkgconfig{{ end }}
+      # cargo-zigbuild hands bindgen zig's own libc headers in place of the system's, so the
+      # sysroot's are added after them for the Avahi bindings.
+      # Room in the Mach-O header for the code signature packaging/macos/bundle.sh adds, which zig
+      # otherwise leaves too little of.
+      - CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-Wl,-headerpad_max_install_names
+      - CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-Wl,-headerpad_max_install_names
+      - BINDGEN_EXTRA_CLANG_ARGS={{ if eq .Os "linux" }}-idirafter /sysroot/linux_{{ .Arch }}/usr/include -idirafter /sysroot/linux_{{ .Arch }}/usr/include/{{ if eq .Arch "amd64" }}x86_64{{ else }}aarch64{{ end }}-linux-gnu{{ end }}
+
+  # The full build for the Mac, which ships only inside the app on the disk image, never in an
+  # archive of its own.
+  - id: full-macos
+    builder: rust
+    binary: midi-harbor
+    targets:
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+    flags: *flags
+    env: *env
+
+  # The headless build carries none of the GUI toolkit, for servers and machines without a
+  # display. It is the only loose binary the Mac gets.
+  - id: headless
+    builder: rust
+    binary: midi-harbor
+    targets:
+      - x86_64-unknown-linux-gnu.2.36
+      - aarch64-unknown-linux-gnu.2.36
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+    flags:
+      - --release
+      - --locked
+      - --package=midi-harbor
+      - --no-default-features
+    env: *env
+
+# One binary for both kinds of Mac, which the app bundle carries. Its id keeps it out of the
+# archives, which on the Mac hold only the headless binaries.
+universal_binaries:
+  - id: macos-app
+    ids: [full-macos]
+    name_template: midi-harbor
+    hooks:
+      # GoReleaser's own edition makes no app bundles or disk images, so the script does.
+      post:
+        - cmd: packaging/macos/bundle.sh "{{ .Path }}" "{{ .Version }}" dist/macos dist
+
+archives:
+  - id: full
+    ids: [full]
+    name_template: "{{ .ProjectName }}-{{ .Version }}.{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: &files
+      - LICENSE.txt
+      - src: docs/*.md
+        dst: docs
+  - id: headless
+    ids: [headless]
+    name_template: "{{ .ProjectName }}-headless-{{ .Version }}.{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    files: *files
+
+nfpms:
+  - id: full
+    ids: [full]
+    package_name: midi-harbor
+    file_name_template: "{{ .ConventionalFileName }}"
+    formats: [deb, rpm]
+    vendor: Midi Harbor
+    homepage: https://github.com/grmrgecko/midi-harbor
+    # Taken from the environment at build time rather than written into the repository.
+    maintainer: "{{ .Env.MIDI_HARBOR_MAINTAINER }}"
+    description: &description |-
+      Manages virtual MIDI ports, MIDI hardware, RTP-MIDI network sessions and
+      Bluetooth LE MIDI links, and reconnects every one of them by itself after
+      sleep, network changes, unplugging and restarts.
+    license: MIT
+    section: sound
+    conflicts: [midi-harbor-headless]
+    replaces: [midi-harbor-headless]
+    contents:
+      # Named for the window's application ID, which is how a desktop pairs the running window
+      # with this entry and its icon.
+      - src: packaging/linux/com.mrgeckosmedia.MidiHarbor.desktop
+        dst: /usr/share/applications/com.mrgeckosmedia.MidiHarbor.desktop
+      - src: Icon.svg
+        dst: /usr/share/icons/hicolor/scalable/apps/com.mrgeckosmedia.MidiHarbor.svg
+      - src: LICENSE.txt
+        dst: /usr/share/doc/midi-harbor/copyright
+      - src: docs/*.md
+        dst: /usr/share/doc/midi-harbor/
+    overrides:
+      deb:
+        dependencies:
+          # The binary uses symbols up to glibc 2.35, which nfpm does not detect by itself.
+          - libc6 (>= 2.35)
+          - libasound2
+          - libavahi-client3
+          - libavahi-common3
+          - libdbus-1-3
+          - libxkbcommon0
+        # Without these the package still works, but sessions are not advertised and Bluetooth
+        # is unavailable. The rest are what the interface loads while it runs rather than links
+        # against: one of X11 or Wayland to draw a window, and one of EGL or Vulkan to render.
+        recommends:
+          - avahi-daemon
+          - bluez
+          - libwayland-client0
+          - libx11-6
+          - libx11-xcb1
+          - libxi6
+          - libxkbcommon-x11-0
+          - libegl1
+          - libvulkan1
+      rpm:
+        dependencies:
+          - glibc >= 2.35
+          - alsa-lib
+          - avahi-libs
+          - dbus-libs
+          - libxkbcommon
+        recommends:
+          - avahi
+          - bluez
+          - libwayland-client
+          - libX11
+          - libX11-xcb
+          - libXi
+          - libxkbcommon-x11
+          - libglvnd-egl
+          - vulkan-loader
+  - id: headless
+    ids: [headless]
+    package_name: midi-harbor-headless
+    file_name_template: "{{ .ConventionalFileName }}"
+    formats: [deb, rpm]
+    vendor: Midi Harbor
+    homepage: https://github.com/grmrgecko/midi-harbor
+    maintainer: "{{ .Env.MIDI_HARBOR_MAINTAINER }}"
+    description: *description
+    license: MIT
+    section: sound
+    conflicts: [midi-harbor]
+    replaces: [midi-harbor]
+    contents:
+      - src: LICENSE.txt
+        dst: /usr/share/doc/midi-harbor-headless/copyright
+      - src: docs/*.md
+        dst: /usr/share/doc/midi-harbor-headless/
+    overrides:
+      deb:
+        dependencies: ["libc6 (>= 2.35)", libasound2, libavahi-client3, libavahi-common3, libdbus-1-3]
+        recommends: [avahi-daemon, bluez]
+      rpm:
+        dependencies: [glibc >= 2.35, alsa-lib, avahi-libs, dbus-libs]
+        recommends: [avahi, bluez]
+
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: dist/*.dmg
+
+# A release takes its version from the tag, which make release checks against VERSION. A snapshot
+# has no tag, so it takes VERSION, which the Makefile passes in.
+snapshot:
+  version_template: "{{ .Env.MIDI_HARBOR_VERSION }}-SNAPSHOT-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+
+release:
+  github:
+    owner: grmrgecko
+    name: midi-harbor
+  extra_files:
+    - glob: dist/*.dmg

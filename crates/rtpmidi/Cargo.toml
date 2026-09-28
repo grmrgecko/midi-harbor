@@ -1,0 +1,17 @@
+[package]
+name = "midi-harbor-rtpmidi"
+description = "AppleMIDI session control and RFC 6295 recovery journal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+midi-harbor-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

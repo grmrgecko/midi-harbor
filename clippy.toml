@@ -1,0 +1,5 @@
+# Library code never panics, but tests may assert freely (AGENTS.md).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
