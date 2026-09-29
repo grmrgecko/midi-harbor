@@ -21,6 +21,10 @@ fn quote(value: &str) -> String {
 ///
 /// `Restart=always` is what brings the daemon back after a crash, and `WantedBy=default.target`
 /// is what starts it at login. Both are required by the resilience rules.
+///
+/// `ExecStop` stops the daemon alone and waits for it before systemd signals the rest of the
+/// unit. Run from an AppImage, the rest is the runtime serving the daemon's own executable, and
+/// signalled together the mount goes while the daemon is still releasing its notes (R-104).
 pub fn render_unit(spec: &ServiceSpec) -> String {
     let mut command = quote(&spec.executable.display().to_string());
     for argument in &spec.arguments {
@@ -43,6 +47,7 @@ pub fn render_unit(spec: &ServiceSpec) -> String {
          [Service]\n\
          Type=simple\n\
          ExecStart={command}\n\
+         ExecStop=/bin/sh -c 'kill -TERM $MAINPID && while kill -0 $MAINPID 2>/dev/null; do sleep 0.1; done'\n\
          Restart=always\n\
          RestartSec=2\n\
          \n{install}"
@@ -154,11 +159,14 @@ mod tests {
     use super::*;
 
     /// Locks the unit directives systemd acts on: `Restart=always` in every case, so a crashed
-    /// daemon comes back; `After=network.target sound.target`, so it starts once ALSA is up; and
-    /// an `[Install]` section with `WantedBy=default.target` only when it should start at login.
+    /// daemon comes back; `After=network.target sound.target`, so it starts once ALSA is up; an
+    /// `ExecStop` that signals the main process alone and waits for it; and an `[Install]` section
+    /// with `WantedBy=default.target` only when it should start at login.
     ///
     /// The directives are as systemd.service(5) and systemd.unit(5) define them. Started before
-    /// ALSA is up, every endpoint would fail its first attempt.
+    /// ALSA is up, every endpoint would fail its first attempt. Without the `ExecStop`, systemd
+    /// signals every process in the unit at once, and a daemon run from an AppImage died of
+    /// SIGBUS as it stopped, its executable unmounted under it (R-104).
     #[test]
     fn the_unit_restarts_after_a_crash_and_starts_at_login_only_when_asked() {
         let cases = [
@@ -178,6 +186,13 @@ mod tests {
             assert!(
                 unit.contains("\nAfter=network.target sound.target\n"),
                 "{name}: the daemon must wait for the network and the sound stack"
+            );
+            assert!(
+                unit.contains(
+                    "\nExecStop=/bin/sh -c 'kill -TERM $MAINPID && while kill -0 $MAINPID \
+                     2>/dev/null; do sleep 0.1; done'\n"
+                ),
+                "{name}: the daemon must be stopped and waited for before the rest of the unit"
             );
             assert_eq!(
                 unit.contains("\n[Install]\nWantedBy=default.target\n"),
