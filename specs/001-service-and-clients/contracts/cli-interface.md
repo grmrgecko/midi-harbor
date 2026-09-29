@@ -1,6 +1,6 @@
 # Contract: Command-Line Interface
 
-**Feature**: 001-service-and-clients, first written as 001-midi-connectivity-manager | **Version**: 1.0 | **Date**: 2026-09-20
+**Feature**: 001-service-and-clients | **Version**: 1.0 | **Date**: 2026-09-20
 
 The user-facing contract for the `midi-harbor` executable. Governed by FR-039 through FR-039h and
 FR-042. Every command here is a thin projection of the [IPC protocol](./ipc-protocol.md); the CLI

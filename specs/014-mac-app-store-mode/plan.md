@@ -1,6 +1,6 @@
 # Implementation Plan: Mac App Store mode
 
-**Branch**: `003-mac-app-store-mode`, this spec's original name | **Date**: 2026-09-27 | **Spec**: [spec.md](./spec.md)
+**Date**: 2026-09-27 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `/specs/014-mac-app-store-mode/spec.md`
 
@@ -95,7 +95,7 @@ design below: no change.
 ### Documentation (this feature)
 
 ```text
-specs/014-mac-app-store-mode/   # first written as 003-mac-app-store-mode
+specs/014-mac-app-store-mode/
 ├── plan.md              # This file
 ├── research.md          # R-094 to R-100
 ├── data-model.md        # Window state at quit, login item status

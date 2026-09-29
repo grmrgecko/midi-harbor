@@ -229,5 +229,4 @@ stops when the user quits entirely (feature 014-mac-app-store-mode, research R-0
 stays a separate process, so a crash in the window still disturbs no connection.
 
 Amendment 1.4.1 (2026-09-27): wording only. The specifications were split into one per
-capability and renumbered by topic, so the features named above are cited by their new names:
-the Windows port was 002-windows-support and the App Store mode 003-mac-app-store-mode.
+capability and renumbered by topic, and the features named above cite the current specs.

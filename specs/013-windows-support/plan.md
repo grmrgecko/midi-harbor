@@ -1,6 +1,6 @@
 # Implementation Plan: Windows support
 
-**Branch**: `002-windows-support`, this spec's original name | **Date**: 2026-09-26 | **Spec**: [spec.md](./spec.md)
+**Date**: 2026-09-26 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `/specs/013-windows-support/spec.md`
 

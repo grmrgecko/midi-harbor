@@ -1,6 +1,6 @@
 # Contract: Daemon gRPC Protocol
 
-**Feature**: 001-service-and-clients, first written as 001-midi-connectivity-manager | **Protocol**: `midiharbor.v1` | **Date**: 2026-09-20
+**Feature**: 001-service-and-clients | **Protocol**: `midiharbor.v1` | **Date**: 2026-09-20
 
 The contract between `midi-harbor daemon` and its clients (the GUI and the CLI). Governed by
 FR-036, FR-037, FR-039c, FR-040, FR-041 and Constitution Principle II.

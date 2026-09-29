@@ -1,6 +1,6 @@
 # Implementation Plan: Midi Harbor — MIDI Connectivity Manager
 
-**Branch**: `001-midi-connectivity-manager`, this spec's original name | **Date**: 2026-09-20 | **Spec**: [spec.md](./spec.md)
+**Date**: 2026-09-20 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `/specs/001-service-and-clients/spec.md`
 
@@ -108,7 +108,7 @@ decisions strengthened compliance rather than eroding it:
 ### Documentation (this feature)
 
 ```text
-specs/001-service-and-clients/   # first written as 001-midi-connectivity-manager
+specs/001-service-and-clients/
 ├── plan.md              # This file, the architecture of the whole project
 ├── spec.md              # The service and its clients; the original input
 ├── research.md          # Architecture findings and the tracked risks

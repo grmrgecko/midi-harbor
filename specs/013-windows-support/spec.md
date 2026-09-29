@@ -1,7 +1,5 @@
 # Feature Specification: Windows support
 
-**Feature Branch**: `002-windows-support`, this spec's original name
-
 **Created**: 2026-09-26
 
 **Status**: Implemented

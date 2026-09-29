@@ -1,7 +1,5 @@
 # Feature Specification: Mac App Store mode
 
-**Feature Branch**: `003-mac-app-store-mode`, this spec's original name
-
 **Created**: 2026-09-27
 
 **Status**: Implemented

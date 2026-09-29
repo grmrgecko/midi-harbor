@@ -1,6 +1,6 @@
 # Research: Windows support
 
-**Feature**: 013-windows-support, first written as 002-windows-support | **Date**: 2026-09-26
+**Feature**: 013-windows-support | **Date**: 2026-09-26
 
 Numbered after the original specification's research, whose last entry was R-082, so every R number in the
 project names one entry. Findings marked **VERIFIED** were measured on the Windows test machine:

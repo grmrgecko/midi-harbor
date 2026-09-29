@@ -1,6 +1,6 @@
 # Research: Service and Clients
 
-**Feature**: 001-service-and-clients, first written as 001-midi-connectivity-manager | **Date**: 2026-09-20
+**Feature**: 001-service-and-clients | **Date**: 2026-09-20
 
 All crate versions below were resolved against crates.io on 2026-09-20. Findings marked
 **VERIFIED** were proven empirically in this repository's environment (macOS 15.6, Apple Silicon,

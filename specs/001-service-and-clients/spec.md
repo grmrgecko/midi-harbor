@@ -1,7 +1,5 @@
 # Feature Specification: Midi Harbor — Service and Clients
 
-**Feature Branch**: `001-midi-connectivity-manager` (this spec's original name)
-
 **Created**: 2026-09-20
 
 **Status**: Implemented

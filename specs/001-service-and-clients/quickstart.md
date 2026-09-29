@@ -1,6 +1,6 @@
 # Quickstart & Validation Guide: Midi Harbor
 
-**Feature**: 001-service-and-clients, first written as 001-midi-connectivity-manager | **Date**: 2026-09-20
+**Feature**: 001-service-and-clients | **Date**: 2026-09-20
 
 Runnable scenarios that prove the feature works end to end. Each maps to user stories and success
 criteria in the spec it validates. Scenarios are ordered so that each is useful on its own — you can

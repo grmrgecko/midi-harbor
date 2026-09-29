@@ -46,7 +46,7 @@ any dependency is committed to.
 ### Stage 0 spikes (retire RISK-2 and RISK-3 before committing dependencies)
 
 - [x] T009 [P] Spike in `spikes/platform-midi/` proving direct `coremidi` 0.9 virtual endpoint creation with `kMIDIPropertyUniqueID` retrieval and `MIDINotifyProc` device notifications, and the `alsa` 0.12 sequencer equivalent — validates the R-003 decision to skip `midir`
-- [x] T010 Record spike outcomes in `specs/001-midi-connectivity-manager/research.md`, updating R-003, R-005, R-006 status from ASSUMED to VERIFIED or switching to the documented fallback; if the BLE peripheral spike fails, add the Complexity Tracking row in `plan.md` and the declared limitation in `.specify/memory/constitution.md`
+- [x] T010 Record spike outcomes in `specs/001-service-and-clients/research.md`, updating R-003, R-005, R-006 status from ASSUMED to VERIFIED or switching to the documented fallback; if the BLE peripheral spike fails, add the Complexity Tracking row in `plan.md` and the declared limitation in `.specify/memory/constitution.md`
 
 **Checkpoint**: Dependencies are proven, not assumed. Fallbacks are chosen explicitly.
 

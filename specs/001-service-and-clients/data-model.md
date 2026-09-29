@@ -1,6 +1,6 @@
 # Data Model: Midi Harbor
 
-**Feature**: 001-service-and-clients, first written as 001-midi-connectivity-manager | **Date**: 2026-09-20
+**Feature**: 001-service-and-clients | **Date**: 2026-09-20
 
 This document defines the domain entities, their fields, relationships, validation rules, and
 state transitions. It is the vocabulary shared by the daemon, the IPC contract, the CLI, and the

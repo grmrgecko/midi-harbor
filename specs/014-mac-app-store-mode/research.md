@@ -1,6 +1,6 @@
 # Research: Mac App Store mode
 
-**Feature**: 014-mac-app-store-mode, first written as 003-mac-app-store-mode | **Date**: 2026-09-27
+**Feature**: 014-mac-app-store-mode | **Date**: 2026-09-27
 
 Numbered after the Windows port's research (013), whose last entry is R-093. Findings marked **VERIFIED**
 were measured on the development Mac (macOS 15, Darwin 24.6, Apple silicon) with the app
