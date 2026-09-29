@@ -35,6 +35,27 @@ Linux-oriented and must be turned off on macOS.
 **Alternatives considered**: `iced` directly (libcosmic is built on it) — rejected because the user
 specified libcosmic and the spike proved it viable. `egui` — rejected for the same reason.
 
+**Bumped to `03d7dcb832bc`** (libcosmic master of 2026-09-24, nine commits after `87ab8179`) on
+2026-09-29:
+
+- The Windows failure the owner's notes (`veris/docs/libcosmic.md`) describe, `accesskit_winit`
+  passing `&Window` where winit now has a trait, is still there at accesskit `6c20249`, but it does
+  not reach this build: macOS and Windows turn libcosmic's default features off, `a11y` with them,
+  so no accesskit crate is compiled there. Linux builds `accesskit_winit` with its Unix backend,
+  which is unaffected. Enabling `a11y` on Windows would need the notes' `[patch]` of
+  `wash2/accesskit` to a fork with the fix, rebased onto the accesskit revision libcosmic then
+  uses.
+- `cargo update -p libcosmic` re-resolved `gpu-allocator`'s range for the `windows` crate to 0.57,
+  then 0.61, which the newer accesskit and `ble-peripheral-rust` bring in. `wgpu-hal` 28.0.1 passes
+  it `windows` 0.62 types, so the Windows build failed with mismatched `ID3D12Device` types. The
+  lock file names `windows` 0.62.2 for `gpu-allocator`, as it did before the bump; check it after
+  any `cargo update`, which may move it again.
+- The window at `03d7dcb832bc`: on macOS it opened with its menus; on Linux the AppImage's window
+  rendered on X11 in XFCE; the Windows build passed its tests on the test machine, but the window
+  was not seen there, the machine's desktop being in use.
+- libcosmic's X11 attributes are still overwritten by its Wayland ones
+  (`iced/winit/src/conversion.rs`), so the X11 window class still comes from `argv[0]` (R-104).
+
 ---
 
 ## R-025: What building the window found that no test had

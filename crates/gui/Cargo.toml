@@ -27,17 +27,19 @@ tracing.workspace = true
 # deliberate and re-verified by hand (research R-001).
 [target.'cfg(target_os = "macos")'.dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
-rev = "87ab8179"
+rev = "03d7dcb832bc"
 default-features = false
 features = ["winit", "wgpu", "tokio", "multi-window"]
 
 [target.'cfg(target_os = "linux")'.dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
-rev = "87ab8179"
+rev = "03d7dcb832bc"
 features = ["winit", "wgpu", "tokio", "multi-window", "wayland"]
 
+# Without `a11y` no accesskit crate is built here, so the accesskit_winit fix newer libcosmic needs
+# on Windows does not apply; enabling it would need the override in R-001.
 [target.'cfg(windows)'.dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
-rev = "87ab8179"
+rev = "03d7dcb832bc"
 default-features = false
 features = ["winit", "wgpu", "tokio", "multi-window"]
