@@ -11,6 +11,7 @@ image that adds Rust to GoReleaser's cross-compiling image. It builds:
 | `tar.gz` archive, headless only | Linux and macOS, x86_64 and arm64 |
 | `zip` archive | Windows x86_64 |
 | `.deb` and `.rpm`, `midi-harbor` and `midi-harbor-headless` | Linux x86_64 and arm64 |
+| AppImage, with the graphical interface | Linux x86_64 and arm64 |
 | `.dmg` holding `Midi Harbor.app`, the license and the docs | macOS, one universal binary |
 | `checksums.txt` | all of them |
 
@@ -58,6 +59,19 @@ script renders to `MenuBarIcon.png`; keep it in step with `Icon.svg` by hand.
 
 The Windows executable carries the icon as a resource, compiled by `windres` from mingw-w64, or
 `rc.exe` when building with MSVC. A Windows build fails without one.
+
+## AppImage
+
+GoReleaser makes no AppImages, so `packaging/linux/appimage.sh` makes one from each full Linux
+binary, as `dist/Midi-Harbor-<version>-<x86_64|aarch64>.AppImage`, and the release publishes it.
+The image has `patchelf`, `appimagetool` and the AppImage runtime for both architectures, so the
+arm64 AppImage builds on an x86_64 machine and the other way round.
+
+The AppImage carries the binary, the desktop entry, the icon, the docs, and the Avahi client
+libraries from the Debian 12 sysroot with their license; the binary finds those through its
+RUNPATH. Its `AppRun`, `packaging/linux/AppRun`, starts the binary as `midi-harbor`, which on X11
+is the window's class and what the desktop entry's `StartupWMClass` names. Everything else comes from the host, as with the packages. Its license comes from the
+sysroot too, so after updating from a version without AppImages, run `make build-sysroot` again.
 
 ## macOS app and disk image
 

@@ -91,12 +91,25 @@ pub struct ServiceSpec {
 
 impl ServiceSpec {
     /// Builds a specification running the current executable as the daemon.
+    ///
+    /// From an AppImage it runs the AppImage file, since the running executable is inside a
+    /// mount that is gone once this process exits.
     pub fn for_current_executable() -> Result<Self, ServiceError> {
-        let executable = std::env::current_exe().map_err(|source| ServiceError::Io {
+        let running = std::env::current_exe().map_err(|source| ServiceError::Io {
             operation: "locate",
             path: PathBuf::from("the running executable"),
             source,
         })?;
+        // AppImages exist only on Linux.
+        #[cfg(target_os = "linux")]
+        let executable = appimage_file(
+            &running,
+            std::env::var_os("APPIMAGE"),
+            std::env::var_os("APPDIR"),
+        )
+        .unwrap_or(running);
+        #[cfg(not(target_os = "linux"))]
+        let executable = running;
         Ok(Self {
             executable,
             arguments: vec!["daemon".to_owned()],
@@ -191,6 +204,25 @@ pub fn detect() -> Result<Box<dyn ServiceManager>, ServiceError> {
     }
 }
 
+/// Returns the AppImage file the running executable was started from, if it was.
+///
+/// The AppImage runtime sets `APPIMAGE` to the file and `APPDIR` to where it mounted it, and
+/// every process started from the application inherits both. So the executable must be inside
+/// `APPDIR`, or the variables belong to another AppImage that started this program.
+#[cfg(target_os = "linux")]
+fn appimage_file(
+    running: &Path,
+    appimage: Option<std::ffi::OsString>,
+    appdir: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let appdir = PathBuf::from(appdir?);
+    if appdir.as_os_str().is_empty() || !running.starts_with(&appdir) {
+        return None;
+    }
+    let appimage = PathBuf::from(appimage?);
+    appimage.is_absolute().then_some(appimage)
+}
+
 /// Reports whether the executable a registration points at still exists.
 pub(crate) fn is_stale(registered: Option<&Path>) -> bool {
     registered.is_some_and(|path| !path.exists())
@@ -234,4 +266,66 @@ pub(crate) fn run(command: &str, args: &[&str]) -> Result<String, ServiceError> 
             detail
         },
     })
+}
+
+// AppImages exist only on Linux, and these paths are not absolute on Windows.
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    /// Locks which executable a service registration names when the program runs from an
+    /// AppImage.
+    ///
+    /// The AppImage runtime (AppImage/type2-runtime, runtime.c) mounts the image at
+    /// `/tmp/.mount_<name><random>`, sets `APPDIR` to that mount and `APPIMAGE` to the image
+    /// file, and replaces itself with the application. The mount is gone once the application
+    /// exits, so a unit naming the executable inside it fails at the next login. Children inherit
+    /// both variables, so a program started from another AppImage, such as a terminal, sees that
+    /// AppImage's values while running from somewhere else entirely.
+    #[test]
+    fn a_registration_names_the_appimage_file_only_when_running_from_its_mount() {
+        let mount = "/tmp/.mount_MidiHaAbC123";
+        let inside = "/tmp/.mount_MidiHaAbC123/usr/bin/midi-harbor";
+        let cases = [
+            (
+                "running from the AppImage's mount",
+                inside,
+                Some("/home/user/Apps/Midi-Harbor-0.1.0-x86_64.AppImage"),
+                Some(mount),
+                Some("/home/user/Apps/Midi-Harbor-0.1.0-x86_64.AppImage"),
+            ),
+            (
+                "installed binary started from another AppImage's terminal",
+                "/usr/bin/midi-harbor",
+                Some("/home/user/Apps/Terminal.AppImage"),
+                Some("/tmp/.mount_TerminXyZ789"),
+                None,
+            ),
+            (
+                "installed binary with no AppImage involved",
+                "/usr/bin/midi-harbor",
+                None,
+                None,
+                None,
+            ),
+            (
+                "an empty APPDIR, which every path starts with",
+                inside,
+                Some("/home/user/Apps/Midi-Harbor-0.1.0-x86_64.AppImage"),
+                Some(""),
+                None,
+            ),
+        ];
+        for (name, running, appimage, appdir, want) in cases {
+            assert_eq!(
+                appimage_file(
+                    Path::new(running),
+                    appimage.map(Into::into),
+                    appdir.map(Into::into),
+                ),
+                want.map(PathBuf::from),
+                "{name}: the registration must name a file that outlives this process"
+            );
+        }
+    }
 }

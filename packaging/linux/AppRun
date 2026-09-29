@@ -1,0 +1,8 @@
+#!/bin/bash
+# Starts Midi Harbor from inside its AppImage, under the name midi-harbor.
+#
+# The AppImage runtime passes the AppImage's own path as argv[0], and on X11 the window's class
+# is taken from argv[0], so without this the class would be the AppImage's file name and no
+# desktop would pair the window with its entry, whose StartupWMClass is midi-harbor. exec keeps
+# the process, so systemd's main process and the runtime's mount stay as they are.
+exec -a midi-harbor "${0%/*}/usr/bin/midi-harbor" "$@"

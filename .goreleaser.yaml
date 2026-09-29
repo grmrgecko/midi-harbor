@@ -31,6 +31,10 @@ builds:
       - CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-Wl,-headerpad_max_install_names
       - CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-Wl,-headerpad_max_install_names
       - BINDGEN_EXTRA_CLANG_ARGS={{ if eq .Os "linux" }}-idirafter /sysroot/linux_{{ .Arch }}/usr/include -idirafter /sysroot/linux_{{ .Arch }}/usr/include/{{ if eq .Arch "amd64" }}x86_64{{ else }}aarch64{{ end }}-linux-gnu{{ end }}
+    hooks:
+      # GoReleaser's own edition makes no AppImages, so the script does, for each Linux target.
+      post:
+        - cmd: '{{ if eq .Os "linux" }}packaging/linux/appimage.sh "{{ .Path }}" "{{ .Arch }}" "{{ .Version }}" dist{{ else }}true{{ end }}'
 
   # The full build for the Mac, which ships only inside the app on the disk image, never in an
   # archive of its own.
@@ -188,6 +192,7 @@ checksum:
   name_template: checksums.txt
   extra_files:
     - glob: dist/*.dmg
+    - glob: dist/*.AppImage
 
 # A release takes its version from the tag, which make release checks against VERSION. A snapshot
 # has no tag, so it takes VERSION, which the Makefile passes in.
@@ -203,3 +208,4 @@ release:
     name: midi-harbor
   extra_files:
     - glob: dist/*.dmg
+    - glob: dist/*.AppImage

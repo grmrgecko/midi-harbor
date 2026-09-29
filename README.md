@@ -17,6 +17,7 @@ leaves out the graphical interface, for machines without a display.
 ```bash
 sudo apt install ./midi-harbor_<version>_<arch>.deb    # Debian and Ubuntu
 sudo dnf install ./midi-harbor-<version>-1.<arch>.rpm    # Fedora and RHEL
+chmod +x Midi-Harbor-<version>-x86_64.AppImage              # any other distribution
 ```
 
 The release builds need glibc 2.35 or newer, so RHEL 9 and its rebuilds must build from source.

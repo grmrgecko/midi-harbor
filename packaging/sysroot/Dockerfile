@@ -20,3 +20,6 @@ RUN find /usr/lib -type l -lname '/*' | while read -r link; do \
 FROM scratch
 COPY --from=debian /usr/include /usr/include
 COPY --from=debian /usr/lib /usr/lib
+# The AppImage carries the Avahi client libraries, so it carries their license beside them.
+COPY --from=debian /usr/share/doc/libavahi-client3/copyright /usr/share/doc/libavahi-client3/copyright
+COPY --from=debian /usr/share/common-licenses/LGPL-2.1 /usr/share/common-licenses/LGPL-2.1

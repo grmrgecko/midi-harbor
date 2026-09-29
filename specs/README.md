@@ -27,6 +27,7 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 | [014-mac-app-store-mode](014-mac-app-store-mode/spec.md) | The sandboxed App Store build, run from the menu bar |
 | [015-mac-menus](015-mac-menus/spec.md) | The menus on macOS: File, Edit, View, Window and Help |
 | [016-app-store-submission](016-app-store-submission/spec.md) | Building the package App Store Connect takes |
+| [017-appimage](017-appimage/spec.md) | The AppImage for Linux, and registering the daemon from it |
 
 ## Where each number is
 
@@ -136,3 +137,10 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 - **Success criteria**: SC-S01
 - **Research**: R-103
 - **Tasks**: T245
+
+### 017-appimage
+
+- **Requirements**: FR-I01, FR-I02, FR-I03, FR-I04
+- **Success criteria**: SC-I01
+- **Research**: R-104
+- **Tasks**: T246–T248

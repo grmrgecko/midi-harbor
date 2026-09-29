@@ -51,3 +51,38 @@ RUN apt-get update; \
     cmake --build /tmp/libdmg/build --target dmg-bin -j "$(nproc)"; \
     install -m 0755 /tmp/libdmg/build/dmg/dmg /usr/local/bin/dmg; \
     rm -rf /tmp/rcodesign.tar.gz "/tmp/${name}" /tmp/libdmg
+
+# packaging/linux/appimage.sh builds the AppImages with these: patchelf points the binary at the
+# libraries bundled beside it, and appimagetool packs the tree behind the AppImage runtime for each
+# target architecture, running file to read each binary's. appimagetool is itself an AppImage,
+# unpacked here because a container has no FUSE to mount it with.
+ARG APPIMAGETOOL_VERSION=1.9.1
+ARG APPIMAGE_RUNTIME_VERSION=20251108
+RUN apt-get update; \
+    apt-get --no-install-recommends -y -q install file patchelf; \
+    rm -rf /var/lib/apt/lists/*; \
+    arch=$(uname -m); \
+    case "$arch" in \
+        aarch64) sum=f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158 ;; \
+        x86_64) sum=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0 ;; \
+    esac; \
+    curl --proto '=https' --tlsv1.2 -sSfL -o /tmp/appimagetool.AppImage \
+        "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${arch}.AppImage"; \
+    echo "$sum  /tmp/appimagetool.AppImage" | sha256sum -c -; \
+    chmod +x /tmp/appimagetool.AppImage; \
+    cd /opt; \
+    /tmp/appimagetool.AppImage --appimage-extract > /dev/null; \
+    mv squashfs-root appimagetool; \
+    chmod -R a+rX /opt/appimagetool; \
+    ln -s /opt/appimagetool/AppRun /usr/local/bin/appimagetool; \
+    rm /tmp/appimagetool.AppImage; \
+    mkdir -p /usr/local/share/appimage; \
+    for pair in \
+        x86_64:2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d \
+        aarch64:00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444; do \
+        runtime="/usr/local/share/appimage/runtime-${pair%%:*}"; \
+        curl --proto '=https' --tlsv1.2 -sSfL -o "$runtime" \
+            "https://github.com/AppImage/type2-runtime/releases/download/${APPIMAGE_RUNTIME_VERSION}/runtime-${pair%%:*}"; \
+        echo "${pair#*:}  $runtime" | sha256sum -c -; \
+        chmod 0644 "$runtime"; \
+    done
