@@ -4,7 +4,8 @@ Name=Midi Harbor
 Comment=Virtual MIDI ports, hardware, network sessions and Bluetooth MIDI that reconnect by themselves
 Exec=midi-harbor gui
 Icon=com.mrgeckosmedia.MidiHarbor
-StartupWMClass=com.mrgeckosmedia.MidiHarbor
+# On X11 the window's class is argv[0]'s file name; Wayland pairs by the application ID instead.
+StartupWMClass=midi-harbor
 Terminal=false
 Categories=AudioVideo;Audio;Midi;
 Keywords=MIDI;RTP-MIDI;Network MIDI;Bluetooth;

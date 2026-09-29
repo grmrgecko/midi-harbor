@@ -784,7 +784,7 @@ impl cosmic::Application for App {
         activity_filter.insert().text("Problems only");
         activity_filter.activate_position(0);
 
-        let app = App {
+        let mut app = App {
             core,
             nav,
             page: Page::Endpoints,
@@ -810,6 +810,12 @@ impl cosmic::Application for App {
         // have filled.
         let connect =
             cosmic::task::future(async { Message::Connected(Client::connect(socket).await) });
+        // The window's title, which taskbars and window lists show; libcosmic leaves it empty,
+        // and the header draws its own.
+        let connect = match app.core.main_window_id() {
+            Some(id) => Task::batch([connect, app.set_window_title("Midi Harbor".to_owned(), id)]),
+            None => connect,
+        };
         // The menus as a message rather than now: the window is set up before the event loop
         // runs, and winit builds its default menu once it does, over anything installed earlier.
         #[cfg(target_os = "macos")]
