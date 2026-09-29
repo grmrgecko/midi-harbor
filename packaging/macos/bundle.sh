@@ -209,7 +209,9 @@ notarize() {
         fi
         xcrun stapler staple "$1" >&2
     else
-        rcodesign notary-submit --api-key-file "$api_key" --staple "$1" >&2
+        # An hour rather than rcodesign's ten minutes: Apple holds a team's first submissions for
+        # longer, and a release that stops waiting is left unnotarized.
+        rcodesign notary-submit --api-key-file "$api_key" --max-wait-seconds 3600 --staple "$1" >&2
     fi
 }
 
