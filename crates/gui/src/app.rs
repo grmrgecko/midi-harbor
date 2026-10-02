@@ -8,6 +8,7 @@ use crate::client::{Client, Snapshot};
 use crate::format;
 use crate::onboarding;
 use crate::parts;
+use crate::update;
 use crate::{dialogs, view};
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::app::{Core, Task};
@@ -291,9 +292,26 @@ pub struct ServiceState {
     pub failed: Option<String>,
 }
 
+/// What the window is doing about a daemon that is another build than itself (R-108).
+#[derive(Default)]
+pub struct BuildState {
+    /// Whether the daemon is being replaced now.
+    pub replacing: bool,
+    /// What was found, shown until the user updates the daemon or dismisses the notice.
+    pub notice: Option<update::Notice>,
+}
+
 /// What the window reacts to.
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// The service manager was asked what runs the daemon, which is another build.
+    BuildChecked(Option<midi_harbor_service::ServiceStatus>),
+    /// The user chose to update the daemon to this copy.
+    ReplaceDaemon,
+    /// Replacing the daemon finished.
+    DaemonReplaced(Result<(), String>),
+    /// The notice about the daemon's build was dismissed.
+    DismissBuildNotice,
     /// The periodic refresh fired.
     Tick,
     /// A connection attempt finished.
@@ -462,6 +480,8 @@ pub struct App {
     pub test_note: TestNote,
     /// The background service, while the daemon cannot be reached.
     pub service: ServiceState,
+    /// What is being done about a daemon of another build.
+    pub build: BuildState,
     /// Counts state streams started, so an ended one is replaced by a new one rather than the
     /// subscription deciding it is still the same stream.
     stream_generation: u64,
@@ -481,6 +501,26 @@ pub struct App {
 }
 
 impl App {
+    /// Registers this copy as the service and restarts the daemon from it, as the user asked.
+    fn replace_daemon(&mut self) -> Task<Message> {
+        if self.build.replacing {
+            return Task::none();
+        }
+        self.build.replacing = true;
+        self.build.notice = None;
+        self.client = None;
+        self.service = ServiceState {
+            working: true,
+            ..ServiceState::default()
+        };
+        self.unreachable = Some(
+            "The daemon is being restarted from this copy. Your ports and connections come \
+             back in a moment."
+                .to_owned(),
+        );
+        cosmic::task::future(async { Message::DaemonReplaced(update::replace().await) })
+    }
+
     /// Runs a call against the daemon, reporting only whether it failed.
     fn act<F, Fut>(&self, call: F) -> Task<Message>
     where
@@ -796,6 +836,7 @@ impl cosmic::Application for App {
             monitor: MonitorState::default(),
             test_note: TestNote::default(),
             service: ServiceState::default(),
+            build: BuildState::default(),
             stream_generation: 0,
             selected: None,
             dialog: None,
@@ -938,6 +979,11 @@ impl cosmic::Application for App {
                 // A tick with no client is a reconnect attempt, which is how the window recovers
                 // from a daemon that was restarted while it was open.
                 if self.client.is_none() {
+                    // The daemon being replaced still answers until it is stopped, and is not
+                    // the one to connect to.
+                    if self.build.replacing {
+                        return Task::none();
+                    }
                     let socket = self.socket.clone();
                     return cosmic::task::future(async {
                         Message::Connected(Client::connect(socket).await)
@@ -945,11 +991,61 @@ impl cosmic::Application for App {
                 }
                 self.refresh()
             }
+            Message::Connected(Ok(_)) if self.build.replacing => Task::none(),
             Message::Connected(Ok(client)) => {
+                let same_build = client.same_build();
                 self.client = Some(client);
                 self.unreachable = None;
                 self.service = ServiceState::default();
-                self.refresh()
+                if same_build {
+                    self.build.notice = None;
+                    return self.refresh();
+                }
+                // The App Store app settles this before the window connects, since it starts
+                // the daemon itself.
+                #[cfg(target_os = "macos")]
+                if self.store.is_some() {
+                    return self.refresh();
+                }
+                // Only the standard socket is the service's, so there is nothing to ask about
+                // a daemon reached with --socket.
+                let check = if self.socket.is_some() {
+                    cosmic::task::future(async { Message::BuildChecked(None) })
+                } else {
+                    cosmic::task::future(async {
+                        Message::BuildChecked(update::service_status().await)
+                    })
+                };
+                Task::batch([self.refresh(), check])
+            }
+            Message::BuildChecked(service) => {
+                let Some(client) = &self.client else {
+                    return Task::none();
+                };
+                if !client.same_build() {
+                    self.build.notice = Some(update::Notice::about(
+                        client.daemon_version(),
+                        midi_harbor_core::VERSION,
+                        self.socket.is_some(),
+                        service.as_ref(),
+                    ));
+                }
+                Task::none()
+            }
+            Message::ReplaceDaemon => self.replace_daemon(),
+            Message::DaemonReplaced(result) => {
+                self.build.replacing = false;
+                self.service.working = false;
+                // The next tick connects to whatever is running now, and says so again if it is
+                // still another build.
+                if let Err(error) = result {
+                    self.service.failed = Some(error);
+                }
+                Task::none()
+            }
+            Message::DismissBuildNotice => {
+                self.build.notice = None;
+                Task::none()
             }
             Message::Connected(Err(error)) => {
                 self.unreachable = Some(error);

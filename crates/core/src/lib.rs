@@ -29,6 +29,13 @@ pub mod time;
 /// build step reads. The crates' own versions stay 0.0.0, since they are never published.
 pub const VERSION: &str = include_str!("../../../VERSION").trim_ascii();
 
+/// Identifies this build, apart from every other build of the same version.
+///
+/// The daemon reports it and the window compares it with its own, which is how a window tells
+/// that the daemon it reached was left running by another copy of Midi Harbor (R-108). A UUID
+/// packaging gives everything in one package, or one made when this crate was built.
+pub const BUILD_ID: &str = env!("MIDI_HARBOR_BUILD_ID");
+
 pub use backoff::{Backoff, BackoffPolicy};
 pub use capability::{Capability, CapabilityName, CapabilitySet, UnavailableReason};
 pub use config::Configuration;

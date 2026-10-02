@@ -168,6 +168,19 @@ pub trait ServiceManager: Send + Sync {
     /// Stops the service now.
     fn stop(&self) -> Result<(), ServiceError>;
 
+    /// Registers `spec` in place of whatever is registered and runs it now, stopping the daemon
+    /// the old registration was running.
+    ///
+    /// Stopped before the definition changes, so the service manager stops the process it
+    /// started rather than losing track of it.
+    fn replace(&self, spec: &ServiceSpec) -> Result<PathBuf, ServiceError> {
+        // Nothing running is not a failure of replacing it.
+        let _ = self.stop();
+        let path = self.install(spec)?;
+        self.start()?;
+        Ok(path)
+    }
+
     /// Reports whether the service is installed, running, and whether its registration is stale.
     fn status(&self) -> Result<ServiceStatus, ServiceError>;
 

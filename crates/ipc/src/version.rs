@@ -15,8 +15,8 @@ pub const PROTOCOL_MAJOR: u32 = 1;
 /// is unchanged. 1.2 added `StatusSummary.midi_server_replaced_at`, the last-received and
 /// last-sent times in `TrafficCounters`, and a network port's `automatic_port_counters`, which an
 /// older daemon leaves unset, and `SendTestNote` and `DismissMidiServerWarning`, which it answers
-/// with `UNIMPLEMENTED`.
-pub const PROTOCOL_MINOR: u32 = 2;
+/// with `UNIMPLEMENTED`. 1.3 added `ServerInfo.build_id`, which an older daemon leaves empty.
+pub const PROTOCOL_MINOR: u32 = 3;
 
 /// A client and daemon that cannot talk to each other.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -120,6 +120,7 @@ mod tests {
                 started_at: None,
                 config_path: String::new(),
                 socket_path: String::new(),
+                build_id: String::new(),
             };
             assert_eq!(
                 check_compatibility(&info)

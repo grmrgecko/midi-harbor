@@ -19,6 +19,9 @@ builds:
       - --locked
       - --package=midi-harbor
     env: &env
+      # One identifier for everything this run builds, so a window and the daemon installed
+      # with it agree, and differ from every other release (research R-108).
+      - MIDI_HARBOR_BUILD_ID={{ .Env.MIDI_HARBOR_BUILD_ID }}
       - MACOSX_DEPLOYMENT_TARGET=11.0
       - SDKROOT=/osxcross/MacOSX.sdk
       - PKG_CONFIG_ALLOW_CROSS=1

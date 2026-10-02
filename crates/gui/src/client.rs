@@ -41,6 +41,9 @@ const EVENT_LIMIT: u32 = 100;
 #[derive(Clone)]
 pub struct Client {
     inner: HarborClient<Channel>,
+    /// What the daemon said about itself when the connection was made. Shared, so a clone of
+    /// the client stays as small as its channel.
+    server: std::sync::Arc<midi_harbor_ipc::pb::ServerInfo>,
 }
 
 /// Everything one refresh returns, so the interface never shows two halves of different moments.
@@ -145,7 +148,20 @@ impl Client {
         if let Err(mismatch) = check_compatibility(&server) {
             return Err(mismatch.guidance());
         }
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            server: std::sync::Arc::new(server),
+        })
+    }
+
+    /// Returns the version the daemon reported.
+    pub fn daemon_version(&self) -> &str {
+        &self.server.daemon_version
+    }
+
+    /// Reports whether the daemon is the build this window is. A daemon too old to say is not.
+    pub fn same_build(&self) -> bool {
+        self.server.build_id == midi_harbor_core::BUILD_ID
     }
 
     /// Reads the whole visible state in one pass.

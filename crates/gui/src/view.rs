@@ -53,6 +53,11 @@ pub fn window(app: &App) -> Element<'_, Message> {
     {
         column = column.push(midi_server_banner(at));
     }
+    // Shown above whatever page is open: the daemon is not running what this window came with,
+    // and only the user can say when a restart suits.
+    if let Some(notice) = &app.build.notice {
+        column = column.push(build_banner(notice));
+    }
     // Shown above whatever page is open, because a machine is waiting on an answer and will give
     // up. A page the user has to think to visit would be a prompt nobody sees.
     for invitation in &app.snapshot.invitations {
@@ -704,6 +709,32 @@ fn midi_server_banner<'a>(at: &prost_types::Timestamp) -> Element<'a, Message> {
     .into()
 }
 
+/// Builds the notice that the daemon is another build of Midi Harbor than this window, with the
+/// button that updates it where the window can.
+fn build_banner<'a>(notice: &crate::update::Notice) -> Element<'a, Message> {
+    let mut row = widget::row::with_capacity(4)
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .push(dot(Tone::Waiting))
+        .push(
+            widget::column::with_capacity(2)
+                .push(widget::text::heading(notice.heading()))
+                .push(widget::text::caption(
+                    notice.explanation(midi_harbor_core::VERSION),
+                ))
+                .width(Length::Fill),
+        );
+    if let Some(label) = notice.action() {
+        row = row.push(widget::button::suggested(label).on_press(Message::ReplaceDaemon));
+    }
+    widget::container(
+        row.push(widget::button::text("Not now").on_press(Message::DismissBuildNotice)),
+    )
+    .padding(12)
+    .class(cosmic::theme::Container::Card)
+    .into()
+}
+
 /// Builds the notice for a machine asking to join a network port.
 fn invitation_banner<'a>(app: &'a App, invitation: &'a Invitation) -> Element<'a, Message> {
     let id = invitation.invitation_id.clone();
@@ -762,6 +793,12 @@ fn unreachable<'a>(app: &'a App, error: &'a str) -> Element<'a, Message> {
                 ))
                 .into(),
         };
+    }
+    if app.build.replacing {
+        return column
+            .push(widget::text::title3("Updating Midi Harbor…"))
+            .push(widget::text::body(error))
+            .into();
     }
     let Some(checked) = &app.service.checked else {
         column = column

@@ -489,6 +489,7 @@ impl Harbor for HarborService {
     ) -> Result<Response<pb::ServerInfo>, Status> {
         Ok(Response::new(pb::ServerInfo {
             daemon_version: midi_harbor_core::VERSION.to_owned(),
+            build_id: midi_harbor_core::BUILD_ID.to_owned(),
             protocol_major: midi_harbor_ipc::PROTOCOL_MAJOR,
             protocol_minor: midi_harbor_ipc::PROTOCOL_MINOR,
             started_at: to_proto_time(self.daemon.started_at()),

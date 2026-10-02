@@ -74,7 +74,15 @@ pub async fn run(
                 .status()
                 .map(|status| status.installed)
                 .unwrap_or(false);
-            let path = match manager.install(&spec) {
+            // With --start a daemon already running is stopped first, so the one started is this
+            // copy. Starting a service that is running does nothing, and left an updated program
+            // registered beside the old daemon still running.
+            let installed = if *start {
+                manager.replace(&spec)
+            } else {
+                manager.install(&spec)
+            };
+            let path = match installed {
                 Ok(path) => path,
                 Err(error) => {
                     eprintln!("could not install the service: {error}");
@@ -91,10 +99,6 @@ pub async fn run(
             format.line("it will start automatically at login");
 
             if *start {
-                if let Err(error) = manager.start() {
-                    eprintln!("the service was installed but could not be started: {error}");
-                    return ExitCode::Failure;
-                }
                 return report_started(format);
             }
             ExitCode::Success
@@ -156,6 +160,7 @@ pub async fn run(
                         "definition_path": status.definition_path,
                         "registered_executable": status.registered_executable,
                         "daemon_version": daemon.as_ref().map(|info| info.daemon_version.clone()),
+                        "same_build": daemon.as_ref().map(|info| info.build_id == midi_harbor_core::BUILD_ID),
                         "started_at": started.map(|at| at.to_string()),
                         "uptime_seconds": uptime,
                     }));
@@ -167,6 +172,14 @@ pub async fn run(
                             line.push_str(&format!(", up {}", uptime_text(seconds)));
                         }
                         format.line(line);
+                        // A daemon left running by another copy does not have what this one
+                        // has, and nothing else here would say so.
+                        if info.build_id != midi_harbor_core::BUILD_ID {
+                            format.line(
+                                "daemon: another build than this program; run 'midi-harbor \
+                                 service install --start' to replace it with this one",
+                            );
+                        }
                     }
                     if let Some(path) = &status.definition_path {
                         format.line(format!("definition: {}", path.display()));

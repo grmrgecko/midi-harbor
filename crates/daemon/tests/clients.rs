@@ -360,6 +360,36 @@ async fn a_session_reads_the_same_on_the_stream_as_in_a_listing() {
     );
 }
 
+/// Proves that the daemon tells a client which build it is, in the field protocol 1.3 added.
+///
+/// A window compares it with its own to tell that the daemon was left running by another copy
+/// of Midi Harbor (R-108). Here the client and the daemon are one build, so the two agree; a
+/// daemon that reported nothing would be replaced by every window that reached it.
+#[tokio::test]
+async fn the_daemon_reports_which_build_it_is() {
+    let (_daemon, _platform, socket) = serving("build").await;
+    let mut client = HarborClient::new(
+        transport::connect(&socket)
+            .await
+            .expect("the client connects to the daemon's socket"),
+    );
+    let info = client
+        .get_server_info(pb::GetServerInfoRequest {})
+        .await
+        .expect("the daemon says what it is")
+        .into_inner();
+    assert_eq!(
+        (info.build_id.as_str(), info.protocol_minor),
+        (midi_harbor_core::BUILD_ID, 3),
+        "the daemon's build identifier is not this build's, under protocol 1.3"
+    );
+    assert!(
+        uuid::Uuid::parse_str(&info.build_id).is_ok(),
+        "the build identifier is not a UUID: {:?}",
+        info.build_id
+    );
+}
+
 /// Starts a daemon with one network port accepting everyone, returning its UDP port.
 async fn accepting(label: &str, name: &str) -> (Arc<Daemon>, u16) {
     let root =

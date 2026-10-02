@@ -138,6 +138,14 @@ impl ServiceManager for Launchd {
         Ok(self.plist_path.clone())
     }
 
+    fn replace(&self, spec: &ServiceSpec) -> Result<PathBuf, ServiceError> {
+        // Installing boots the old job out, which stops its daemon. Stopping it first would
+        // only have launchd start the old one again in between.
+        let path = self.install(spec)?;
+        self.start()?;
+        Ok(path)
+    }
+
     fn uninstall(&self) -> Result<(), ServiceError> {
         self.bootout();
         match std::fs::remove_file(&self.plist_path) {

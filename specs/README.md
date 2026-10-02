@@ -29,6 +29,7 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 | [016-app-store-submission](016-app-store-submission/spec.md) | Building the package App Store Connect takes |
 | [017-appimage](017-appimage/spec.md) | The AppImage for Linux, and registering the daemon from it |
 | [018-remembered-machines](018-remembered-machines/spec.md) | Machines a network port connected to: forgetting old connections, following a session that moved, proving which port a session is; answering Apple over a link-local address |
+| [019-daemon-updates](019-daemon-updates/spec.md) | Telling that the daemon is another build than the window, and updating it when asked |
 
 ## Where each number is
 
@@ -152,3 +153,10 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 - **Success criteria**: SC-P01, SC-P02
 - **Research**: R-105–R-107
 - **Tasks**: T249–T252
+
+### 019-daemon-updates
+
+- **Requirements**: FR-B01, FR-B02, FR-B03, FR-B04, FR-B05, FR-B06, FR-B07
+- **Success criteria**: SC-B01, SC-B02
+- **Research**: R-108
+- **Tasks**: T253

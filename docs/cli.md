@@ -47,10 +47,10 @@ endpoint is refused with the candidates listed, never resolved by guessing.
 |---|---|
 | `daemon [--log-file PATH]` | Run the daemon in the foreground. Refuses to start while another is running. With `--log-file`, it logs to that file instead of the terminal, rolling it over at 10 MB. |
 | `gui` | Open the graphical interface. |
-| `service install [--start]` | Register the daemon to run at login, and with `--start`, start it now. Running it again updates the registration in place. |
+| `service install [--start]` | Register the daemon to run at login, and with `--start`, start it now. Running it again updates the registration in place, and with `--start` stops a daemon already running so the one started is this copy. |
 | `service uninstall` | Stop the daemon and remove the registration. The configuration stays. |
 | `service start`, `service stop` | Start or stop the registered daemon. |
-| `service status` | Whether it is registered, running, and whether the registration points at a binary that has since moved, and the running daemon's version and how long it has been up. |
+| `service status` | Whether it is registered, running, and whether the registration points at a binary that has since moved, and the running daemon's version and how long it has been up. It says when the daemon is another build than the program asked, as after an update the daemon has not been restarted for; `--json` gives that as `same_build`. |
 
 See [Installation](installation.md) for what registering does on each platform.
 

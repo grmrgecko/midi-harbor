@@ -13,6 +13,8 @@ TARGET_VOLUME := midi-harbor-release-target
 MIDI_HARBOR_MAINTAINER ?= $(shell git config user.name) <$(shell git config user.email)>
 # The version every build step uses; a release is the commit tagged with it.
 VERSION := $(shell cat VERSION)
+# Identifies everything one release run builds, apart from every other build of the version.
+BUILD_ID := $(shell uuidgen | tr '[:upper:]' '[:lower:]')
 
 # GoReleaser runs one build at a time: its Rust builder reads each binary from target/, which
 # the full and headless builds of one target share. Cargo still builds each in parallel.
@@ -29,6 +31,7 @@ GORELEASER = mkdir -p $(CARGO_CACHE) && docker run --rm \
 	-e HOME=/tmp \
 	-e MIDI_HARBOR_MAINTAINER="$(MIDI_HARBOR_MAINTAINER)" \
 	-e MIDI_HARBOR_VERSION="$(VERSION)" \
+	-e MIDI_HARBOR_BUILD_ID="$(BUILD_ID)" \
 	-v $(CURDIR):/src \
 	-v $(SYSROOT):/sysroot:ro \
 	-v $(CARGO_CACHE):/cargo-home \

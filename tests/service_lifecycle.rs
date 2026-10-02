@@ -3,7 +3,8 @@
 //! The binary runs with `PATH` holding nothing but a stand-in for `launchctl` or `systemctl`, so
 //! the real one cannot be reached and nothing is registered with the machine. The stand-in keeps
 //! its state in files and starts the daemon itself, as the real one would, so `service start`
-//! has a daemon to wait for. Everything else a user would have is the real code: the definition
+//! has a daemon to wait for. Starting a service that is running does nothing, as with the real
+//! ones. Everything else a user would have is the real code: the definition
 //! written under a scratch home, the status read back from it, and the configuration beside it.
 
 #![cfg(any(target_os = "macos", target_os = "linux"))]
@@ -36,6 +37,7 @@ case "$1" in
   bootout) [ -f "$FAKE_STATE/loaded" ] || { echo "Boot-out failed: 3: No such process" >&2; exit 3; }
            halt; /bin/rm -f "$FAKE_STATE/loaded" ;;
   kickstart) [ -f "$FAKE_STATE/loaded" ] || exit 113
+             running && exit 0
              "$FAKE_DAEMON" daemon > "$FAKE_STATE/daemon.out" 2>&1 &
              echo $! > "$FAKE_STATE/pid" ;;
   kill) halt ;;
@@ -67,7 +69,8 @@ case "$1" in
   daemon-reload) ;;
   enable) : > "$FAKE_STATE/enabled" ;;
   disable) halt; /bin/rm -f "$FAKE_STATE/enabled" ;;
-  start) "$FAKE_DAEMON" daemon > "$FAKE_STATE/daemon.out" 2>&1 &
+  start) running && exit 0
+         "$FAKE_DAEMON" daemon > "$FAKE_STATE/daemon.out" 2>&1 &
          echo $! > "$FAKE_STATE/pid" ;;
   stop) halt ;;
   is-active) if running; then echo active; else echo inactive; exit 3; fi ;;
@@ -140,6 +143,14 @@ impl Machine {
         )
     }
 
+    /// Returns the process the stand-in is running as the daemon.
+    fn daemon_pid(&self) -> String {
+        std::fs::read_to_string(self.root.join("state/pid"))
+            .expect("the stand-in recorded the daemon it started")
+            .trim()
+            .to_owned()
+    }
+
     fn status(&self) -> serde_json::Value {
         let (code, out) = self.run(&["--json", "service", "status"]);
         assert_eq!(code, 0, "service status must succeed: {out}");
@@ -157,11 +168,14 @@ impl Drop for Machine {
 }
 
 /// Locks the service lifecycle a user drives: install registers the daemon stopped, a second
-/// install updates the one registration, start waits until the daemon answers, stop ends it, and
-/// uninstall removes the registration and leaves the configuration byte for byte as it was.
+/// install updates the one registration, start waits until the daemon answers, installing with
+/// `--start` while it runs replaces the running daemon, stop ends it, and uninstall removes the
+/// registration and leaves the configuration byte for byte as it was.
 ///
 /// Losing a user's ports and routes to an uninstall, or leaving two registrations to fight over
-/// one socket, are the failures this guards.
+/// one socket, are the failures this guards. So is an update that registers the new program and
+/// leaves the old daemon running: starting a service that is already running does nothing
+/// (R-108).
 #[test]
 fn the_service_installs_starts_stops_and_uninstalls_in_place() {
     let machine = Machine::new();
@@ -210,6 +224,23 @@ fn the_service_installs_starts_stops_and_uninstalls_in_place() {
         true,
         "the daemon must be running after start"
     );
+
+    // Installing with --start while it runs replaces the daemon with the program that asked.
+    let old = machine.daemon_pid();
+    let (code, out) = machine.run(&["service", "install", "--start"]);
+    assert_eq!(code, 0, "install --start over a running daemon: {out}");
+    let status = machine.status();
+    assert_eq!(
+        (status["running"].clone(), status["same_build"].clone()),
+        (true.into(), true.into()),
+        "the daemon must be running, and the build that installed it: {status}"
+    );
+    assert_ne!(
+        machine.daemon_pid(),
+        old,
+        "the daemon running before the install was left running"
+    );
+
     let (code, out) = machine.run(&["service", "stop"]);
     assert_eq!(code, 0, "stop must succeed: {out}");
     assert_eq!(

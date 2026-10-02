@@ -40,17 +40,28 @@ impl DaemonOwner {
     /// and waits for it to serve.
     ///
     /// A second daemon would open the same ports and sessions beside the first, so one that
-    /// answers is always used rather than replaced.
+    /// answers is used when it is this build, and stopped first when it is another.
     pub async fn start(
         program: &Path,
         arguments: &[OsString],
         socket: &Path,
     ) -> Result<Self, String> {
         if midi_harbor_ipc::transport::probe(socket).await {
-            info!(socket = %socket.display(), "using the daemon already running");
-            return Ok(Self::Attached {
+            let attached = Self::Attached {
                 socket: socket.to_path_buf(),
-            });
+            };
+            // One left by an earlier version of the app is stopped and replaced by this app's
+            // own, or an update would go on running the old daemon (R-108). One that does not
+            // answer is treated as this build, and used.
+            let same_build = crate::client::Client::connect(Some(socket.to_path_buf()))
+                .await
+                .map_or(true, |client| client.same_build());
+            if same_build {
+                info!(socket = %socket.display(), "using the daemon already running");
+                return Ok(attached);
+            }
+            info!(socket = %socket.display(), "replacing the daemon another build left running");
+            attached.stop().await;
         }
 
         // Start one, and wait for it to serve.

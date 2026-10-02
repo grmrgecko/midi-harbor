@@ -11,6 +11,7 @@ mod dialogs;
 pub mod format;
 mod onboarding;
 mod parts;
+mod update;
 mod view;
 
 use cosmic::app::Settings;

@@ -60,6 +60,24 @@ through a browser until the download's quarantine is removed with
 
 `packaging/README.md` describes how the packages are built.
 
+## Updating
+
+Install the new version over the old one. The daemon goes on running the copy it was started
+from until it is restarted, so the first time the window is opened afterwards it says **The
+daemon is outdated** and offers **Update now**. That registers the copy you opened as the service
+and restarts the daemon from it; connections drop for a few seconds and come back. Nothing is
+restarted until you choose it, so an update installed during a show waits for you.
+
+The same notice appears when Midi Harbor is installed a second way, as an AppImage and then a
+package of another release: Update now makes the service run the copy you opened. Two packages of
+one release are the same build, and neither replaces the other's daemon.
+
+Without the window, `midi-harbor service status` says when the daemon is another build, and
+`midi-harbor service install --start` replaces it with the program that was asked.
+
+The Mac App Store build updates its daemon with the app: quitting Midi Harbor stops the daemon,
+and the updated app starts its own.
+
 ## Building from source
 
 ### Requirements

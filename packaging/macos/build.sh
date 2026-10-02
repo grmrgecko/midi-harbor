@@ -18,6 +18,10 @@ set -eu
 cd "$(dirname "$0")/../.."
 version=$(cat VERSION)
 build=${CARGO_TARGET_DIR:-target}
+# One identifier for every binary in the bundle. The app and its helper are built separately,
+# and each architecture too, and the app replaces a daemon whose identifier is not its own.
+MIDI_HARBOR_BUILD_ID=${MIDI_HARBOR_BUILD_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}
+export MIDI_HARBOR_BUILD_ID
 universal=
 if rustup target list --installed | grep -qx x86_64-apple-darwin \
     && rustup target list --installed | grep -qx aarch64-apple-darwin; then
