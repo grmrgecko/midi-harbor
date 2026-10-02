@@ -96,9 +96,10 @@ impl HarborService {
 
     /// Resolves a peer reference into an address to connect to.
     ///
-    /// Tried in order: a literal address, then a discovered peer, then a hostname. Discovery is
-    /// checked before hostname resolution deliberately — a peer's advertised name could otherwise
-    /// resolve to some unrelated machine and we would connect to the wrong thing.
+    /// Tried in order: a literal address, then a discovered peer, then a remembered machine,
+    /// then a hostname. Discovery and the remembered machines are checked before hostname
+    /// resolution deliberately — a peer's advertised name could otherwise resolve to some
+    /// unrelated machine and we would connect to the wrong thing.
     ///
     /// Connecting by address is a first-class path, not a fallback: a network that filters
     /// multicast breaks discovery, and a peer whose address is known should still be reachable.
@@ -113,6 +114,12 @@ impl HarborService {
             .find(|(peer, label)| peer.id.to_string() == reference || label == reference)
             .or_else(|| peers.iter().find(|(peer, _)| peer.name == reference));
         if let Some(address) = found.and_then(|(peer, _)| peer.address()) {
+            return Ok(address);
+        }
+
+        // A remembered machine is listed under its own identifier whether or not it is
+        // advertising, so the listing's identifier has to resolve here too.
+        if let Some(address) = self.daemon.remembered_address(reference).await {
             return Ok(address);
         }
 

@@ -17,16 +17,22 @@ use std::sync::mpsc::Sender;
 pub const SERVICE: &str = "_apple-midi._udp";
 
 /// Registers `name` on `port` with the platform responder and keeps it published until
-/// `running` is cleared.
+/// `running` is cleared. `properties` are published with it as its TXT record.
 ///
 /// Blocks for the life of the advertisement, so the caller gives it a thread. `ready` receives
 /// one answer once the responder has accepted or refused the name, so a rejected registration is
 /// reported rather than leaving a session that believes it is advertised.
-pub fn advertise(name: &str, port: u16, running: &AtomicBool, ready: &Sender<Result<(), String>>) {
+pub fn advertise(
+    name: &str,
+    port: u16,
+    properties: &[(String, String)],
+    running: &AtomicBool,
+    ready: &Sender<Result<(), String>>,
+) {
     #[cfg(windows)]
-    windows::advertise(name, port, running, ready);
+    windows::advertise(name, port, properties, running, ready);
     #[cfg(not(windows))]
-    zeroconf::advertise(name, port, running, ready);
+    zeroconf::advertise(name, port, properties, running, ready);
 }
 
 /// Reports whether this machine has a responder to register with.

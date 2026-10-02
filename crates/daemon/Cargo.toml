@@ -11,7 +11,9 @@ workspace = true
 
 [dependencies]
 serde_json.workspace = true
+ed25519-dalek.workspace = true
 gethostname.workspace = true
+hex.workspace = true
 rand.workspace = true
 socket2.workspace = true
 mdns-sd.workspace = true

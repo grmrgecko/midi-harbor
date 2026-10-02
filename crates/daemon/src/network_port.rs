@@ -187,8 +187,11 @@ impl Daemon {
                         .read(|config, _| config.preferences.advertise_sessions)
                         .await;
                     if announce
-                        && let Err(error) =
-                            discovery.advertise(after.local_name.as_str(), session.control_port())
+                        && let Err(error) = discovery.advertise(
+                            after.local_name.as_str(),
+                            session.control_port(),
+                            id,
+                        )
                     {
                         warn!(endpoint = %updated.name, error = %error, "could not advertise the new name");
                     }

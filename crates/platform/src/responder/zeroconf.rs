@@ -12,6 +12,7 @@ use tracing::{debug, warn};
 pub(super) fn advertise(
     name: &str,
     port: u16,
+    properties: &[(String, String)],
     running: &AtomicBool,
     ready: &std::sync::mpsc::Sender<Result<(), String>>,
 ) {
@@ -27,6 +28,16 @@ pub(super) fn advertise(
 
     let mut service = ::zeroconf::MdnsService::new(service_type, port);
     service.set_name(name);
+    if !properties.is_empty() {
+        let mut record = ::zeroconf::TxtRecord::new();
+        for (key, value) in properties {
+            if let Err(error) = record.insert(key, value) {
+                let _ = ready.send(Err(error.to_string()));
+                return;
+            }
+        }
+        service.set_txt_record(record);
+    }
 
     let announced = Arc::new(AtomicBool::new(false));
     let callback_announced = Arc::clone(&announced);

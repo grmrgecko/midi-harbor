@@ -1,14 +1,14 @@
-//! Feeds hostile datagrams to the two RTP-MIDI parsers a peer on the network can reach.
+//! Feeds hostile datagrams to the three RTP-MIDI parsers a peer on the network can reach.
 //!
-//! Both ports read whatever arrives, so the control parser and the data parser each get every
-//! input. Neither may allocate more than a small multiple of what it was sent, and whatever either
-//! accepts has to come back unchanged after being encoded and parsed again: a packet the daemon
-//! would read one way and send another is a peer misreading us.
+//! Both ports read whatever arrives, so the control parser, the identity parser and the data
+//! parser each get every input. None may allocate more than a small multiple of what it was sent,
+//! and whatever one accepts has to come back unchanged after being encoded and parsed again: a
+//! packet the daemon would read one way and send another is a peer misreading us.
 
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use midi_harbor_rtpmidi::{ControlPacket, RtpMidiPacket};
+use midi_harbor_rtpmidi::{ControlPacket, IdentityPacket, RtpMidiPacket};
 
 /// Heap bytes a parse may hold per byte of input, which covers a vector doubling past a message
 /// list at one message per input byte.
@@ -31,6 +31,13 @@ fuzz_target!(
         assert!(allocations.bytes_max <= bound, "control parse held {allocations:?}");
         if let Some(packet) = control {
             assert_eq!(ControlPacket::parse(&packet.encode()), Ok(packet));
+        }
+
+        let mut identity = None;
+        let allocations = allocation_counter::measure(|| identity = IdentityPacket::parse(data).ok());
+        assert!(allocations.bytes_max <= bound, "identity parse held {allocations:?}");
+        if let Some(packet) = identity {
+            assert_eq!(IdentityPacket::parse(&packet.encode()), Ok(packet));
         }
 
         let mut rtp = None;

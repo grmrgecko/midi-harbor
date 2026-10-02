@@ -193,14 +193,23 @@ one is added.
 ## Peers
 
 Machines this one knows, added by `network peer add`, by answering an invitation with `--always`,
-or by `network connect`, which remembers where it connected without trusting it.
+or by `network connect`, which remembers where it connected without trusting it. A machine
+remembered only by `network connect`, with no name of its own and no trust, is removed again once
+no network port connects to it.
 
 | Field | | Default |
 |---|---|---|
 | `name` | What to call it. | required |
 | `addresses` | Where it was last reached, as `host:port`. | none |
 | `trusted` | Whether its invitations are accepted without asking. | `false` |
+| `advertised_as` | The session name advertised at its address, kept by the daemon. While the link to it is down and a session of this name is advertised somewhere else, the network port connects there and the address here is rewritten: on a new port of the same host for any machine, on a new host only when `trusted` is `false`. | none |
+| `key` | The public key of the Midi Harbor that runs it, in hexadecimal, kept by the daemon once the machine proves it. With `port_id` it replaces `advertised_as`: the machine is followed only to a session that advertises both, under any name, and to another host once it proves them there, trusted or not. | none |
+| `port_id` | The identifier of the network port connected to, in that Midi Harbor's configuration. | none |
 | `id` | A stable identifier. | generated |
+
+The daemon's own key is not in this file. It is in `identity.key` beside it, readable only by its
+owner, and is made the first time the daemon starts. Copying the configuration to another machine
+leaves the key behind on purpose: two machines with one key would each pass for the other.
 
 ## Preferences
 

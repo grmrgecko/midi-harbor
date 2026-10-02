@@ -61,6 +61,19 @@ pub struct PeerConfig {
     /// Whether invitations from this peer are accepted without asking.
     #[serde(default)]
     pub trusted: bool,
+    /// The session name it was advertising when a network port connected to it, if it was
+    /// advertising one. A session advertised under this name somewhere else is where the
+    /// machine is connected to again (R-105).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advertised_as: Option<String>,
+    /// The public key of the daemon that runs it, in hexadecimal, when it is a Midi Harbor that
+    /// proved the key where a network port connected to it (R-106).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// The identifier of the network port connected to, in that daemon's configuration, proved
+    /// with the key. A session is the same port only when it proves both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port_id: Option<EndpointId>,
 }
 
 /// A persisted MIDI connection between two endpoints.
@@ -770,6 +783,9 @@ mod tests {
                 name: "Studio PC".to_owned(),
                 addresses: vec!["192.0.2.13:5004".to_owned()],
                 trusted: true,
+                advertised_as: Some("Studio".to_owned()),
+                key: Some("5a".repeat(32)),
+                port_id: Some(EndpointId::from_uuid(uuid::Uuid::from_u128(7))),
             }],
             routes: vec![RouteConfig {
                 from_connector: Some(2),
@@ -849,6 +865,9 @@ mod tests {
                         name: "Studio PC".to_owned(),
                         addresses: vec!["192.0.2.13:5004".to_owned()],
                         trusted: true,
+                        advertised_as: None,
+                        key: None,
+                        port_id: None,
                     }],
                     ..Configuration::default()
                 },

@@ -62,7 +62,10 @@ midi-harbor-service = { path = "crates/service" }
 bytes = "1"
 clap = { version = "4.6", features = ["derive"] }
 directories = "6.0"
+# Signs and verifies the proof of which network port a session is (R-106).
+ed25519-dalek = "3.0"
 gethostname = "1.1"
+hex = "0.4"
 if-addrs = "0.15"
 jiff = { version = "0.2", features = ["serde"] }
 mdns-sd = "0.21"

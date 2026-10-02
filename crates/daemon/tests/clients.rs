@@ -21,6 +21,7 @@ use midi_harbor_daemon::Daemon;
 use midi_harbor_ipc::{HarborClient, pb, transport};
 use midi_harbor_platform::fake::{FakeMidiPlatform, Injected};
 use midi_harbor_platform::midi::MidiPlatform;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -487,6 +488,75 @@ async fn a_client_connects_a_second_machine_alongside_and_disconnects_one() {
         refused.code(),
         tonic::Code::InvalidArgument,
         "a malformed address is the client's mistake, and says so in its code"
+    );
+}
+
+/// Proves that a machine added by address is connected to by the identifier the listing gives
+/// it, and is still listed once the network port disconnects from it.
+///
+/// Regression: the identifier was looked up only among the machines advertising themselves, so
+/// connecting to a remembered machine failed with "no peer named" and its identifier. A machine
+/// the user added is theirs to forget; only one recorded by connecting to it goes with the
+/// connection.
+#[tokio::test]
+async fn a_client_connects_to_a_remembered_machine_by_its_listed_identifier() {
+    let (daemon, _platform, socket) = serving("remembered").await;
+    let stage = daemon
+        .create_network_session("Stage", 0, InvitationPolicy::Prompt)
+        .await
+        .expect("the network port Stage is created");
+    let (_front, front_port) = accepting("remembered-front", "Front of House").await;
+    let mut client = HarborClient::new(
+        transport::connect(&socket)
+            .await
+            .expect("the client connects to the daemon's socket"),
+    );
+
+    let added = client
+        .add_manual_peer(pb::AddManualPeerRequest {
+            address: "127.0.0.1".to_owned(),
+            port: u32::from(front_port),
+            name: Some("Front of House".to_owned()),
+            trusted: Some(false),
+        })
+        .await
+        .expect("the client adds Front of House by address")
+        .into_inner();
+    client
+        .connect_peer(pb::ConnectPeerRequest {
+            session_endpoint_id: stage.id.to_string(),
+            peer_id: added.id.clone(),
+            alongside: false,
+        })
+        .await
+        .expect("the client connects Stage to the machine by its identifier");
+    let peer = daemon
+        .session_status(stage.id)
+        .await
+        .expect("Stage is running")
+        .peer_address;
+    assert_eq!(
+        peer,
+        Some(SocketAddr::from(([127, 0, 0, 1], front_port))),
+        "Stage connects to the address the machine was added at"
+    );
+
+    client
+        .disconnect_peer(pb::DisconnectPeerRequest {
+            session_endpoint_id: stage.id.to_string(),
+        })
+        .await
+        .expect("the client disconnects Stage");
+    // Whatever is advertising on the network the test runs on is listed too.
+    let listed = client
+        .list_peers(pb::ListPeersRequest::default())
+        .await
+        .expect("the daemon lists its known machines")
+        .into_inner()
+        .peers;
+    assert!(
+        listed.iter().any(|peer| peer.id == added.id),
+        "a machine the user added and named is kept when the connection goes: {listed:?}"
     );
 }
 

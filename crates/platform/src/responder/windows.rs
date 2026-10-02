@@ -87,6 +87,7 @@ pub(super) fn present() -> bool {
 pub(super) fn advertise(
     name: &str,
     port: u16,
+    properties: &[(String, String)],
     running: &AtomicBool,
     ready: &Sender<Result<(), String>>,
 ) {
@@ -100,9 +101,16 @@ pub(super) fn advertise(
     // Describe the service.
     let instance_name = wide(&format!("{}.{SERVICE}.local", instance_label(name)));
     let host_name = wide(&format!("{}.local", computer_name()));
-    // SAFETY: both strings are NUL-terminated and outlive the call, which copies them. Null
-    // addresses ask the responder to answer with the host's own, and a zero property count means
-    // the key and value arrays are not read.
+    // The TXT record, as two arrays of strings the same length.
+    let keys: Vec<Vec<u16>> = properties.iter().map(|(key, _)| wide(key)).collect();
+    let values: Vec<Vec<u16>> = properties.iter().map(|(_, value)| wide(value)).collect();
+    let key_pointers: Vec<PCWSTR> = keys.iter().map(|key| key.as_ptr()).collect();
+    let value_pointers: Vec<PCWSTR> = values.iter().map(|value| value.as_ptr()).collect();
+    let property_count = u32::try_from(properties.len()).unwrap_or(0);
+    // SAFETY: every string is NUL-terminated and outlives the call, which copies them. Null
+    // addresses ask the responder to answer with the host's own. The key and value arrays each
+    // hold `property_count` pointers to those strings, or zero is passed for an unrepresentable
+    // count and neither is read.
     let instance = unsafe {
         (api.construct)(
             instance_name.as_ptr(),
@@ -112,9 +120,9 @@ pub(super) fn advertise(
             port,
             0,
             0,
-            0,
-            std::ptr::null(),
-            std::ptr::null(),
+            property_count,
+            key_pointers.as_ptr(),
+            value_pointers.as_ptr(),
         )
     };
     if instance.is_null() {

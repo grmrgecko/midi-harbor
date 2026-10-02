@@ -9,6 +9,7 @@ pub mod bluetooth;
 pub mod dataplane;
 pub mod devices;
 pub mod discovery;
+pub mod identity;
 pub mod log_file;
 pub mod net;
 pub mod network_port;

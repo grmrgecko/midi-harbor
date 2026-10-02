@@ -2,11 +2,14 @@
 //!
 //! Run with `cargo run -p midi-harbor-daemon --example discover`.
 
+use midi_harbor_core::ids::EndpointId;
 use midi_harbor_daemon::discovery::Discovery;
+use midi_harbor_daemon::identity::Identity;
 use std::time::Duration;
 
 fn main() {
-    let discovery = match Discovery::start() {
+    // A key of its own for the run, as every advertised session carries one.
+    let discovery = match Discovery::start(&Identity::generate().public_key()) {
         Ok(discovery) => discovery,
         Err(error) => {
             eprintln!("could not start discovery: {error}");
@@ -15,7 +18,7 @@ fn main() {
     };
 
     // Advertise on a port nothing else is using, so this cannot disturb a real session.
-    if let Err(error) = discovery.advertise("Midi Harbor Example", 5104) {
+    if let Err(error) = discovery.advertise("Midi Harbor Example", 5104, EndpointId::new()) {
         eprintln!("could not advertise: {error}");
     }
 

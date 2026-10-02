@@ -1,7 +1,8 @@
 //! The daemon's owned state.
 
 use crate::dataplane::{self, RtConsumer};
-use crate::discovery::{DiscoveredPeer, Discovery};
+use crate::discovery::{DiscoveredPeer, Discovery, Followed, Step};
+use crate::identity::{Identity, PortIdentity};
 use crate::session::{
     Inbound, InvitationNotice, NetworkSession, Place, RESUME_AFTER_SLEEP, SessionNotice,
 };
@@ -406,6 +407,11 @@ pub struct Daemon {
     /// Discovery, when it could be started. A machine without it still runs; peers simply have
     /// to be added by address.
     pub(crate) discovery: Option<Arc<Discovery>>,
+    /// The key this daemon's network ports prove themselves with.
+    identity: Arc<Identity>,
+    /// Held while machines are followed to where they are advertised, so two looks at once do
+    /// not each move the same machine.
+    following: tokio::sync::Mutex<()>,
     /// Why the service cannot be installed on this machine, when it cannot. Asked once, since
     /// whether a service manager exists does not change while the daemon runs.
     pub(crate) service_unavailable: Option<midi_harbor_core::capability::UnavailableReason>,
@@ -529,14 +535,22 @@ fn same_address(held: &str, address: SocketAddr) -> bool {
 ///
 /// Found by the address exactly as stored, as a connected peer always has been. A machine
 /// added here is not trusted: connecting out to a machine is not the same as letting it in
-/// unasked.
-fn known_peer_at(config: &mut Configuration, address: SocketAddr) -> midi_harbor_core::ids::PeerId {
+/// unasked. The session name advertised at the address, when there is one, is kept with the
+/// machine, so it can be followed when that session moves (R-105).
+fn known_peer_at(
+    config: &mut Configuration,
+    address: SocketAddr,
+    advertised_as: Option<String>,
+) -> midi_harbor_core::ids::PeerId {
     let stored = address.to_string();
     if let Some(known) = config
         .peers
-        .iter()
+        .iter_mut()
         .find(|known| known.addresses.iter().any(|held| held == &stored))
     {
+        if advertised_as.is_some() {
+            known.advertised_as = advertised_as;
+        }
         return known.id;
     }
     let peer = config::PeerConfig {
@@ -544,6 +558,9 @@ fn known_peer_at(config: &mut Configuration, address: SocketAddr) -> midi_harbor
         name: address.ip().to_canonical().to_string(),
         addresses: vec![stored],
         trusted: false,
+        advertised_as,
+        key: None,
+        port_id: None,
     };
     let id = peer.id;
     config.peers.push(peer);
@@ -564,10 +581,39 @@ fn network_session_mut(
     }
 }
 
+/// Drops the remembered machines that hold nothing but an address no network port connects to.
+///
+/// Connecting to a machine records it, so the network port can name its peer. Once the port lets
+/// it go, a record the user neither named nor trusted is only an old connection, and listing it
+/// offers a machine that may no longer be listening there.
+fn drop_unused_peers(config: &mut Configuration) {
+    let used: Vec<midi_harbor_core::ids::PeerId> = config
+        .endpoints
+        .iter()
+        .filter_map(|endpoint| match &endpoint.kind {
+            EndpointKind::NetworkSession(session) => Some(session),
+            _ => None,
+        })
+        .flat_map(|session| session.peer.iter().chain(session.other_peers.iter()))
+        .copied()
+        .collect();
+    config.peers.retain(|peer| {
+        // Named after its own address, as a machine recorded by connecting to it is.
+        let unnamed = peer
+            .addresses
+            .iter()
+            .any(|held| same_host(held, &peer.name));
+        peer.trusted || !unnamed || used.contains(&peer.id)
+    });
+}
+
 /// Lists remembered machines and advertised sessions together, one entry per session.
 ///
-/// An advertisement from a remembered machine marks that machine as present rather than adding
-/// a second entry, which would make the trusted one look like a different machine. Two
+/// An advertisement from a trusted machine marks that machine as present rather than adding a
+/// second entry, which would make the trusted one look like a different machine. Trust belongs
+/// to the host, so any session it advertises marks it. A machine remembered without trust is
+/// only an address, so it is marked by the session advertised at that address and by no other:
+/// folding another session into it listed that session under a port nothing listens on. Two
 /// advertisements from one machine stay two entries: they are separate sessions, and folding the
 /// second into the first left it impossible to find.
 fn merge_known_peers(
@@ -587,19 +633,25 @@ fn merge_known_peers(
     let remembered_count = known.len();
 
     for (peer, label) in discovered {
-        let address = peer.address().map(|address| address.to_string());
-        let existing = address.as_ref().and_then(|address| {
-            known
-                .iter_mut()
-                .take(remembered_count)
-                .find(|known| known.addresses.iter().any(|held| same_host(held, address)))
+        let address = peer.address();
+        let existing = address.and_then(|address| {
+            let advertised = address.to_string();
+            known.iter_mut().take(remembered_count).find(|known| {
+                known.addresses.iter().any(|held| {
+                    if known.trusted {
+                        same_host(held, &advertised)
+                    } else {
+                        same_address(held, address)
+                    }
+                })
+            })
         });
         match existing {
             Some(entry) => entry.discovered = true,
             None => known.push(KnownPeer {
                 id: peer.id,
                 name: label,
-                addresses: address.map(|a| vec![a]).unwrap_or_default(),
+                addresses: address.map(|a| vec![a.to_string()]).unwrap_or_default(),
                 discovered: true,
                 trusted: false,
             }),
@@ -745,7 +797,13 @@ impl Daemon {
         let (changes, _) = broadcast::channel(STATE_CHANNEL_CAPACITY);
         // Discovery failing is not fatal: peers can still be added by address, and the capability
         // query reports honestly that browsing is unavailable.
-        let discovery = match Discovery::start() {
+        // A daemon that cannot keep its key still runs. It proves itself until it restarts, and
+        // is a stranger to every machine after.
+        let identity = Arc::new(Identity::load_or_create(&paths).unwrap_or_else(|error| {
+            error!(error = %error, "failed to keep this daemon's key; using one for this run");
+            Identity::generate()
+        }));
+        let discovery = match Discovery::start(&identity.public_key()) {
             Ok(discovery) => Some(discovery),
             Err(error) => {
                 warn!(error = %error, "network discovery unavailable; peers must be added by address");
@@ -801,6 +859,8 @@ impl Daemon {
             restart: tokio::sync::Notify::new(),
             stop: tokio::sync::Notify::new(),
             discovery,
+            identity,
+            following: tokio::sync::Mutex::new(()),
             service_unavailable,
             host_name: default_machine_name(),
             bt_links: RwLock::new(HashMap::new()),
@@ -819,6 +879,7 @@ impl Daemon {
         daemon.watch_midi_environment();
         daemon.watch_bluetooth();
         daemon.watch_retries();
+        daemon.watch_discovery();
         daemon.watch_traffic_log();
         Ok(daemon)
     }
@@ -1035,7 +1096,7 @@ impl Daemon {
                 continue;
             };
             if announce {
-                if let Err(error) = discovery.advertise(name, port) {
+                if let Err(error) = discovery.advertise(name, port, id) {
                     warn!(endpoint = %name, error = %error, "could not advertise session");
                 }
             } else {
@@ -1393,6 +1454,8 @@ impl Daemon {
             .map(|route| format!("{} -> {}", route.from, route.to))
             .collect();
 
+        // A network port takes the machines only it connected to with it.
+        drop_unused_peers(&mut inner.config);
         config::save(&self.paths, &inner.config)?;
         drop(inner);
 
@@ -1759,6 +1822,19 @@ impl Daemon {
         merge_known_peers(&remembered, self.peers())
     }
 
+    /// Returns where a remembered machine is reached, by identifier or name.
+    pub async fn remembered_address(&self, reference: &str) -> Option<SocketAddr> {
+        let inner = self.inner.read().await;
+        inner
+            .config
+            .peers
+            .iter()
+            .find(|known| known.id.to_string() == reference || known.name == reference)?
+            .addresses
+            .iter()
+            .find_map(|address| address.parse::<SocketAddr>().ok())
+    }
+
     /// Remembers a machine by address, so it is let in without being asked about.
     pub async fn add_manual_peer(
         self: &Arc<Self>,
@@ -1800,6 +1876,9 @@ impl Daemon {
                     name: label,
                     addresses: vec![stored],
                     trusted,
+                    advertised_as: None,
+                    key: None,
+                    port_id: None,
                 };
                 inner.config.peers.push(peer.clone());
                 peer
@@ -1977,7 +2056,11 @@ impl Daemon {
                     change => {
                         watcher
                             .record_session_change(id, &session_name, change)
-                            .await
+                            .await;
+                        // A link that went down may be one whose session is already advertised
+                        // somewhere else, seen while the link was still up. One that came up
+                        // may be to a session whose name and key are not held yet.
+                        watcher.follow_discovery().await;
                     }
                 }
             }
@@ -2000,6 +2083,9 @@ impl Daemon {
         // The peers the user has already accepted, so a trusted one is not asked about again.
         let trusted = self.trusted_addresses().await;
         let _ = session.configure(config.invitation_policy, trusted).await;
+        let _ = session
+            .identify(Arc::clone(&self.identity), endpoint.id)
+            .await;
 
         let port = session.control_port();
         // A session left to the system's choice of port keeps the port it was given. Choosing
@@ -2030,7 +2116,7 @@ impl Daemon {
             .await;
         if announce
             && let Some(discovery) = &self.discovery
-            && let Err(error) = discovery.advertise(config.local_name.as_str(), port)
+            && let Err(error) = discovery.advertise(config.local_name.as_str(), port, endpoint.id)
         {
             warn!(endpoint = %endpoint.name, error = %error, "could not advertise session");
         }
@@ -2092,24 +2178,27 @@ impl Daemon {
     ///
     /// The peer is kept among the remembered machines, found by address or added, and is not
     /// trusted by this. Connected to none, the session forgets the machines it had connected
-    /// beside the peer too, since disconnecting a session ends every machine's part.
+    /// beside the peer too, since disconnecting a session ends every machine's part. A machine
+    /// let go this way that was remembered only for the connection is dropped with it.
     async fn remember_session_peer(
         &self,
         id: EndpointId,
         peer: Option<SocketAddr>,
     ) -> Result<(), DaemonError> {
+        let advertised_as = peer.and_then(|address| self.advertised_at(address));
         let mut inner = self.inner.write().await;
-        let chosen = peer.map(|address| known_peer_at(&mut inner.config, address));
+        let before = inner.config.clone();
+        let chosen = peer.map(|address| known_peer_at(&mut inner.config, address, advertised_as));
         let Some(session) = network_session_mut(&mut inner.config, id) else {
             return Ok(());
         };
-        let before = session.clone();
         session.peer = chosen;
         match chosen {
             Some(chosen) => session.other_peers.retain(|other| *other != chosen),
             None => session.other_peers.clear(),
         }
-        if *session == before {
+        drop_unused_peers(&mut inner.config);
+        if inner.config == before {
             return Ok(());
         }
         config::save(&self.paths, &inner.config)?;
@@ -2123,15 +2212,19 @@ impl Daemon {
         id: EndpointId,
         machine: SocketAddr,
     ) -> Result<(), DaemonError> {
+        let advertised_as = self.advertised_at(machine);
         let mut inner = self.inner.write().await;
-        let known = known_peer_at(&mut inner.config, machine);
+        let before = inner.config.clone();
+        let known = known_peer_at(&mut inner.config, machine, advertised_as);
         let Some(session) = network_session_mut(&mut inner.config, id) else {
             return Ok(());
         };
-        if session.peer == Some(known) || session.other_peers.contains(&known) {
+        if session.peer != Some(known) && !session.other_peers.contains(&known) {
+            session.other_peers.push(known);
+        }
+        if inner.config == before {
             return Ok(());
         }
-        session.other_peers.push(known);
         config::save(&self.paths, &inner.config)?;
         Ok(())
     }
@@ -2178,8 +2271,177 @@ impl Daemon {
         if *session == before {
             return Ok(());
         }
+        drop_unused_peers(&mut inner.config);
         config::save(&self.paths, &inner.config)?;
         Ok(())
+    }
+
+    /// Returns the name of the session advertised at `address`, if one is.
+    fn advertised_at(&self, address: SocketAddr) -> Option<String> {
+        self.peers()
+            .into_iter()
+            .find(|(peer, _)| peer.is_at(address))
+            .map(|(peer, _)| peer.name)
+    }
+
+    /// Follows the sessions discovery sees now.
+    async fn follow_discovery(self: &Arc<Self>) {
+        let advertised: Vec<DiscoveredPeer> =
+            self.peers().into_iter().map(|(peer, _)| peer).collect();
+        self.follow_advertised(&advertised).await;
+    }
+
+    /// Returns this daemon's public key in hexadecimal, as its sessions advertise it.
+    pub fn identity_key(&self) -> String {
+        hex::encode(self.identity.public_key())
+    }
+
+    /// Brings what each network port holds about the machines it connects to into line with
+    /// the sessions advertised now, and moves a machine whose link is down to where its session
+    /// is advertised (R-105, R-106).
+    ///
+    /// A network port invites the address it connected to until it answers. A session that
+    /// comes back on another port, or a machine given another address, never answers there, and
+    /// its advertisement is the only thing that says where it went. The new address is stored,
+    /// so a restart goes straight to it.
+    pub async fn follow_advertised(self: &Arc<Self>, advertised: &[DiscoveredPeer]) {
+        let _following = self.following.lock().await;
+
+        // Decide what the advertisements ask for, machine by machine.
+        let steps: Vec<(
+            EndpointId,
+            midi_harbor_core::ids::PeerId,
+            SocketAddr,
+            bool,
+            Step,
+        )> = {
+            let inner = self.inner.read().await;
+            let mut steps = Vec::new();
+            for endpoint in &inner.config.endpoints {
+                let EndpointKind::NetworkSession(session) = &endpoint.kind else {
+                    continue;
+                };
+                for id in session.peer.iter().chain(session.other_peers.iter()) {
+                    let Some(known) = inner.config.peers.iter().find(|known| known.id == *id)
+                    else {
+                        continue;
+                    };
+                    let Some(held) = known
+                        .addresses
+                        .iter()
+                        .find_map(|address| address.parse::<SocketAddr>().ok())
+                    else {
+                        continue;
+                    };
+                    let followed = Followed {
+                        held,
+                        trusted: known.trusted,
+                        advertised_as: known.advertised_as.as_deref(),
+                        identity: known
+                            .key
+                            .as_deref()
+                            .zip(known.port_id)
+                            .and_then(|(key, port)| PortIdentity::new(key, port)),
+                    };
+                    if let Some(step) = crate::discovery::next_step(&followed, advertised) {
+                        steps.push((endpoint.id, *id, held, known.trusted, step));
+                    }
+                }
+            }
+            steps
+        };
+
+        for (endpoint, peer, held, trusted, step) in steps {
+            let session = self.sessions.read().await.get(&endpoint).map(Arc::clone);
+            let Some(session) = session else {
+                continue;
+            };
+            match step {
+                // Keep what the session where the machine is says about it. Its identity is
+                // kept only once proved there: an advertisement can name any address.
+                Step::Learn { name, identity } => {
+                    let proved = match identity {
+                        Some(identity) if session.prove(held, identity).await => Some(identity),
+                        _ => None,
+                    };
+                    if name.is_none() && proved.is_none() {
+                        continue;
+                    }
+                    self.change_known_peer(peer, |known| {
+                        if let Some(name) = name {
+                            known.advertised_as = Some(name);
+                        }
+                        if let Some(identity) = proved {
+                            known.key = Some(identity.key_text());
+                            known.port_id = Some(identity.port);
+                        }
+                    })
+                    .await;
+                }
+                // Move the link. The session refuses for a machine carrying MIDI, whose
+                // advertisement elsewhere may be another machine that took the name.
+                Step::Move { to, name, prove } => {
+                    if let Some(identity) = prove
+                        && !session.prove(to, identity).await
+                    {
+                        debug!(%endpoint, %to, "a session advertised as a known port did not prove it");
+                        continue;
+                    }
+                    if !session.move_machine(held, to).await {
+                        continue;
+                    }
+                    let stored = held.to_string();
+                    self.change_known_peer(peer, |known| {
+                        known.advertised_as = Some(name);
+                        if let Some(address) = known
+                            .addresses
+                            .iter_mut()
+                            .find(|address| **address == stored)
+                        {
+                            *address = to.to_string();
+                        }
+                    })
+                    .await;
+                    // Trust is held by host, so a trusted machine proved on another host is
+                    // trusted there from now on.
+                    if trusted && to.ip().to_canonical() != held.ip().to_canonical() {
+                        self.push_invitation_policy().await;
+                    }
+                    let _ = self.changes.send(Change::EndpointChanged(endpoint));
+                }
+            }
+        }
+    }
+
+    /// Changes one remembered machine and stores the configuration.
+    async fn change_known_peer(
+        &self,
+        peer: midi_harbor_core::ids::PeerId,
+        change: impl FnOnce(&mut config::PeerConfig),
+    ) {
+        let mut inner = self.inner.write().await;
+        let Some(known) = inner.config.peers.iter_mut().find(|known| known.id == peer) else {
+            return;
+        };
+        change(known);
+        if let Err(error) = config::save(&self.paths, &inner.config) {
+            error!(peer = %peer, error = %error, "failed to store what is known about a machine");
+        }
+    }
+
+    /// Watches the sessions discovery sees come and go, and follows each machine a network port
+    /// connects to to where it is advertised.
+    fn watch_discovery(self: &Arc<Self>) {
+        let Some(discovery) = self.discovery.clone() else {
+            return;
+        };
+        let daemon = Arc::clone(self);
+        tokio::spawn(async move {
+            loop {
+                discovery.changed().await;
+                daemon.follow_discovery().await;
+            }
+        });
     }
 
     /// Creates a network session with its automatic port, persists it, and starts listening.
@@ -3506,6 +3768,9 @@ impl Daemon {
                 name,
                 addresses: vec![address],
                 trusted: true,
+                advertised_as: None,
+                key: None,
+                port_id: None,
             });
         }
         config::save(&self.paths, &inner.config)?;
@@ -4195,14 +4460,19 @@ mod known_peer_tests {
             addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))],
             port,
             is_self: false,
+            identity: None,
         };
         (peer, name.to_owned())
     }
 
-    /// Proves how remembered and advertised machines merge into one list. A remembered machine is
+    /// Proves how remembered and advertised machines merge into one list. A trusted machine is
     /// matched by host, so its advertisement marks it discovered under the name the user gave it
     /// instead of listing it twice; two sessions one machine advertises, which Apple's Network
     /// MIDI lets a Mac run side by side, are each listed when nothing remembers that host.
+    ///
+    /// Regression: a machine remembered without trust at a port it no longer listened on was
+    /// matched by host too, so another session that host advertised was listed as the old
+    /// connection, on this network, at the dead port.
     #[test]
     fn a_machine_is_listed_once_however_it_is_known() {
         let studio_mac = config::PeerConfig {
@@ -4210,6 +4480,18 @@ mod known_peer_tests {
             name: "Studio Mac".to_owned(),
             addresses: vec!["192.0.2.10:5004".to_owned()],
             trusted: true,
+            advertised_as: None,
+            key: None,
+            port_id: None,
+        };
+        let old_connection = config::PeerConfig {
+            id: PeerId::new(),
+            name: "192.0.2.10".to_owned(),
+            addresses: vec!["192.0.2.10:5004".to_owned()],
+            trusted: false,
+            advertised_as: None,
+            key: None,
+            port_id: None,
         };
         let cases = [
             (
@@ -4219,10 +4501,28 @@ mod known_peer_tests {
                 vec![("Apple Two", true, false), ("Studio", true, false)],
             ),
             (
-                "a remembered machine that advertises is listed once, as remembered",
-                vec![studio_mac],
+                "a trusted machine that advertises is listed once, as remembered",
+                vec![studio_mac.clone()],
                 vec![advertised("Studio", 5004)],
                 vec![("Studio Mac", true, true)],
+            ),
+            (
+                "a trusted machine is marked by a session on any port of its host",
+                vec![studio_mac],
+                vec![advertised("Studio", 5006)],
+                vec![("Studio Mac", true, true)],
+            ),
+            (
+                "an untrusted address is marked by the session advertised there",
+                vec![old_connection.clone()],
+                vec![advertised("Studio", 5004)],
+                vec![("192.0.2.10", true, false)],
+            ),
+            (
+                "an untrusted address does not take a session on another port",
+                vec![old_connection],
+                vec![advertised("Studio", 5006)],
+                vec![("192.0.2.10", false, false), ("Studio", true, false)],
             ),
         ];
         for (name, remembered, discovered, want) in cases {

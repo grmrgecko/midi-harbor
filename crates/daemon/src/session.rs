@@ -8,17 +8,20 @@
 //! user has it enabled, and every failure silences the endpoint before anything else, so a peer
 //! that vanishes mid-phrase cannot leave a note sounding.
 
+use crate::identity::{Identity, PortIdentity};
 use crate::net::{Datagram, NetError, SessionSockets};
 use midi_harbor_core::backoff::BackoffPolicy;
 use midi_harbor_core::controls::Controls;
 use midi_harbor_core::endpoint::{InvitationDecision, InvitationPolicy};
 use midi_harbor_core::failure::FailureReason;
+use midi_harbor_core::ids::EndpointId;
 use midi_harbor_core::midi::MidiMessage;
 use midi_harbor_core::state::{ConnectionPhase, ConnectionState, Effect, Event};
 use midi_harbor_core::time::{Clock, SystemClock};
 use midi_harbor_rtpmidi::clock::ticks_from;
+use midi_harbor_rtpmidi::identity::NONCE_LEN;
 use midi_harbor_rtpmidi::session::{Action, Port, Role, Session, SessionFailure};
-use midi_harbor_rtpmidi::{ControlPacket, RtpMidiPacket};
+use midi_harbor_rtpmidi::{ControlPacket, IdentityError, IdentityPacket, RtpMidiPacket};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -37,6 +40,16 @@ pub const TICK_INTERVAL: Duration = Duration::from_millis(250);
 /// A peer sends a clock exchange every few seconds and MIDI far more often, and one goodbye a
 /// second is enough for it to hear.
 pub const GOODBYE_INTERVAL: Duration = Duration::from_secs(1);
+
+/// How long a machine has to prove which network port it is.
+///
+/// A Midi Harbor on the same network answers in a millisecond or two. Long enough for a
+/// challenge lost on the way to be sent again, short enough that a machine that will never
+/// answer does not hold up following the others.
+pub const PROOF_WAIT: Duration = Duration::from_secs(2);
+
+/// How long before an unanswered challenge is sent again.
+const CHALLENGE_INTERVAL: Duration = Duration::from_millis(500);
 
 /// How long a session that ended itself ahead of sleep waits, awake, before reconnecting
 /// without being told the machine woke.
@@ -78,6 +91,32 @@ pub enum Command {
     Invite(SocketAddr, oneshot::Sender<Place>),
     /// End one machine's part, answering whether it was taking part.
     DisconnectMachine(SocketAddr, oneshot::Sender<bool>),
+    /// Connect to a machine this side connected to at a new address in place of the old one,
+    /// unless it is carrying MIDI, answering whether it was moved.
+    Move {
+        /// Where it was connected to.
+        from: SocketAddr,
+        /// Where it is connected to from now on.
+        to: SocketAddr,
+        /// Answered with whether it moved.
+        done: oneshot::Sender<bool>,
+    },
+    /// Take the key to answer challenges with, and the identifier of the network port this is.
+    Identify {
+        /// The daemon's key.
+        identity: Arc<Identity>,
+        /// The network port's identifier.
+        port: EndpointId,
+    },
+    /// Ask the port listening at an address to prove it is `expected`, answering whether it did.
+    Prove {
+        /// The control address to ask.
+        at: SocketAddr,
+        /// The port it must prove it is.
+        expected: PortIdentity,
+        /// Answered with whether it proved it in time.
+        done: oneshot::Sender<bool>,
+    },
     /// Take a new name, told to machines from the next invitation on. A machine already
     /// connected keeps the name it was told, as Apple's sessions do.
     Rename(String),
@@ -271,6 +310,8 @@ impl NetworkSession {
             peer_invited: false,
             invited_guests: HashMap::new(),
             joined_guests: HashSet::new(),
+            identity: None,
+            proving: Vec::new(),
         };
         let running = tokio::spawn(supervisor.run(inbox));
 
@@ -344,6 +385,49 @@ impl NetworkSession {
         if self
             .commands
             .send(Command::DisconnectMachine(machine, done))
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        answer.await.unwrap_or(false)
+    }
+
+    /// Connects to a machine this side connected to at `to` in place of `from`, and reports
+    /// whether it did.
+    ///
+    /// A machine carrying MIDI is left where it is, and so is one the session does not connect
+    /// to. The supervisor decides, since only it knows which of its links are up.
+    pub async fn move_machine(&self, from: SocketAddr, to: SocketAddr) -> bool {
+        let (done, answer) = oneshot::channel();
+        if self
+            .commands
+            .send(Command::Move { from, to, done })
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        answer.await.unwrap_or(false)
+    }
+
+    /// Gives the session the key it answers challenges with, and says which network port it is.
+    pub async fn identify(&self, identity: Arc<Identity>, port: EndpointId) -> bool {
+        self.commands
+            .send(Command::Identify { identity, port })
+            .await
+            .is_ok()
+    }
+
+    /// Asks the port listening at `at` to prove it is `expected`, and reports whether it did
+    /// within `PROOF_WAIT`.
+    ///
+    /// Sent only to a session that advertises a key. No other implementation knows the packet.
+    pub async fn prove(&self, at: SocketAddr, expected: PortIdentity) -> bool {
+        let (done, answer) = oneshot::channel();
+        if self
+            .commands
+            .send(Command::Prove { at, expected, done })
             .await
             .is_err()
         {
@@ -437,6 +521,26 @@ struct Supervisor {
     invited_guests: HashMap<SocketAddr, ConnectionState>,
     /// The guests that have finished joining.
     joined_guests: HashSet<SocketAddr>,
+    /// The key challenges are answered with, and which network port this is.
+    identity: Option<(Arc<Identity>, EndpointId)>,
+    /// The challenges sent and not yet answered.
+    proving: Vec<Challenge>,
+}
+
+/// A challenge sent to a port, waiting for its proof.
+struct Challenge {
+    /// The control address asked.
+    at: SocketAddr,
+    /// What was sent, which the proof must echo.
+    nonce: [u8; NONCE_LEN],
+    /// The port it must prove it is.
+    expected: PortIdentity,
+    /// When it was first sent.
+    asked: Instant,
+    /// When it was last sent.
+    sent: Instant,
+    /// Answered with whether it was proved.
+    done: oneshot::Sender<bool>,
 }
 
 impl Supervisor {
@@ -484,6 +588,10 @@ impl Supervisor {
             Command::DisconnectMachine(machine, done) => {
                 let found = self.disconnect_machine(machine).await;
                 let _ = done.send(found);
+            }
+            Command::Move { from, to, done } => {
+                let moved = self.move_machine(from, to).await;
+                let _ = done.send(moved);
             }
             Command::Connect(peer) => {
                 self.connect(peer).await;
@@ -568,6 +676,20 @@ impl Supervisor {
                 self.policy = policy;
                 self.trusted = trusted;
             }
+            Command::Identify { identity, port } => self.identity = Some((identity, port)),
+            Command::Prove { at, expected, done } => {
+                let now = Instant::now();
+                let challenge = Challenge {
+                    at: canonical(at),
+                    nonce: rand::random(),
+                    expected,
+                    asked: now,
+                    sent: now,
+                    done,
+                };
+                self.send_challenge(challenge.at, challenge.nonce).await;
+                self.proving.push(challenge);
+            }
             Command::Rename(name) => {
                 info!(session = %self.name, to = %name, "network session renamed");
                 self.name = name;
@@ -600,8 +722,110 @@ impl Supervisor {
         self.carry_out(actions).await;
     }
 
+    /// Sends a challenge to the port listening at `at`.
+    async fn send_challenge(&self, at: SocketAddr, nonce: [u8; NONCE_LEN]) {
+        let packet = IdentityPacket::Challenge { nonce };
+        self.send_to(Port::Control, at, &packet.encode()).await;
+    }
+
+    /// Sends unanswered challenges again, and gives up on those out of time.
+    async fn tend_challenges(&mut self) {
+        let now = Instant::now();
+        let (waiting, expired): (Vec<Challenge>, Vec<Challenge>) =
+            std::mem::take(&mut self.proving)
+                .into_iter()
+                .partition(|challenge| now.saturating_duration_since(challenge.asked) < PROOF_WAIT);
+        for challenge in expired {
+            debug!(session = %self.name, at = %challenge.at, "no proof of which port this is");
+            let _ = challenge.done.send(false);
+        }
+        self.proving = waiting;
+        let mut again = Vec::new();
+        for challenge in &mut self.proving {
+            if now.saturating_duration_since(challenge.sent) >= CHALLENGE_INTERVAL {
+                challenge.sent = now;
+                again.push((challenge.at, challenge.nonce));
+            }
+        }
+        for (at, nonce) in again {
+            self.send_challenge(at, nonce).await;
+        }
+    }
+
+    /// Answers a challenge, or takes a proof for one this side sent.
+    async fn on_identity(&mut self, packet: IdentityPacket, from: SocketAddr) {
+        match packet {
+            IdentityPacket::Challenge { nonce } => {
+                let Some((identity, port)) = &self.identity else {
+                    return;
+                };
+                let proof = IdentityPacket::Proof {
+                    nonce,
+                    key: identity.public_key(),
+                    port_id: port.to_bytes(),
+                    signature: identity.prove(&nonce, from, *port),
+                };
+                self.send_to(Port::Control, from, &proof.encode()).await;
+            }
+            IdentityPacket::Proof {
+                nonce,
+                key,
+                port_id,
+                signature,
+            } => {
+                let Some(index) = self
+                    .proving
+                    .iter()
+                    .position(|challenge| challenge.at == from && challenge.nonce == nonce)
+                else {
+                    return;
+                };
+                // The answer must be the port asked for, signed for a challenge from this
+                // port: sent from one of this machine's addresses, on this control port. A
+                // wrong answer is ignored rather than ending the wait, so a forged one cannot
+                // spoil a real one on its way.
+                let claimed = PortIdentity {
+                    key,
+                    port: EndpointId::from_bytes(port_id),
+                };
+                let control_port = self.sockets.control_port();
+                let proved = self.proving.get(index).is_some_and(|challenge| {
+                    claimed == challenge.expected
+                        && crate::discovery::local_addresses().into_iter().any(|own| {
+                            crate::identity::verifies(
+                                &claimed,
+                                &nonce,
+                                SocketAddr::new(own, control_port),
+                                &signature,
+                            )
+                        })
+                });
+                if proved {
+                    let challenge = self.proving.swap_remove(index);
+                    let _ = challenge.done.send(true);
+                }
+            }
+        }
+    }
+
     /// Handles a datagram arriving on either port.
     async fn on_datagram(&mut self, datagram: Datagram) {
+        // The identity exchange stands apart from any session: a port is asked which it is
+        // whether or not it is connected to the asker.
+        if datagram.port == Port::Control {
+            match IdentityPacket::parse(&datagram.bytes) {
+                Ok(packet) => {
+                    self.on_identity(packet, canonical(datagram.from)).await;
+                    return;
+                }
+                Err(IdentityError::NotIdentity) => {}
+                Err(error) => {
+                    debug!(from = %datagram.from, error = %error, "discarding an identity packet");
+                    return;
+                }
+            }
+        }
+
         // A guest's traffic goes to the guest's own session machine, never the peer's.
         let from = control_address(&datagram);
         if self.guests.contains_key(&from) {
@@ -801,6 +1025,7 @@ impl Supervisor {
 
     /// Gives the session machine a chance to act on elapsed time.
     async fn on_tick(&mut self) {
+        self.tend_challenges().await;
         for guest in self.guest_addresses() {
             let ticks = self.ticks();
             if let Some(session) = self.guests.get_mut(&guest) {
@@ -892,7 +1117,7 @@ impl Supervisor {
         };
         let target = match port {
             Port::Control => peer,
-            Port::Data => SocketAddr::new(peer.ip(), peer.port().saturating_add(1)),
+            Port::Data => on_port(peer, peer.port().saturating_add(1)),
         };
         let sent = self.sockets.send(port, target, bytes).await;
         let no_route = sent.as_ref().is_err_and(NetError::is_no_route);
@@ -919,7 +1144,7 @@ impl Supervisor {
     async fn send_to(&self, port: Port, peer: SocketAddr, bytes: &[u8]) {
         let target = match port {
             Port::Control => peer,
-            Port::Data => SocketAddr::new(peer.ip(), peer.port().saturating_add(1)),
+            Port::Data => on_port(peer, peer.port().saturating_add(1)),
         };
         if let Err(error) = self.sockets.send(port, target, bytes).await {
             debug!(session = %self.name, %target, error = %error, "could not answer a peer");
@@ -1589,6 +1814,49 @@ impl Supervisor {
         true
     }
 
+    /// Connects to a machine this side connected to at `to` in place of `from`, unless it is
+    /// carrying MIDI, and reports whether it moved.
+    ///
+    /// The attempt in progress at the old address is dropped without a goodbye, since nothing
+    /// was established there to end.
+    async fn move_machine(&mut self, from: SocketAddr, to: SocketAddr) -> bool {
+        let (from, to) = (canonical(from), canonical(to));
+        if self.peer.map(canonical) == Some(from) {
+            if self.status.lock().await.state.phase() == ConnectionPhase::Connected {
+                return false;
+            }
+            info!(session = %self.name, %from, %to, "following the peer to where it is advertised now");
+            self.connect(to).await;
+            return true;
+        }
+        if self.invited_guests.contains_key(&from) {
+            if self.joined_guests.contains(&from) {
+                return false;
+            }
+            info!(session = %self.name, %from, %to, "following a second machine to where it is advertised now");
+            let _ = self.invited_guests.remove(&from);
+            let _ = self.guests.remove(&from);
+            let _ = self.invite(to).await;
+            return true;
+        }
+        // Waiting out sleep, it is reconnected to at the new address on waking.
+        if let Some((peer, since)) = self.asleep
+            && canonical(peer) == from
+        {
+            self.asleep = Some((to, since));
+            return true;
+        }
+        if let Some(asleep) = self
+            .asleep_guests
+            .iter_mut()
+            .find(|asleep| canonical(**asleep) == from)
+        {
+            *asleep = to;
+            return true;
+        }
+        false
+    }
+
     /// Makes a guest the session's peer once the session has no other, so the machines still
     /// connected are not left carried by nothing the session reports.
     ///
@@ -1668,9 +1936,19 @@ fn failure_reason(failure: &SessionFailure, no_network: bool) -> FailureReason {
 fn control_address(datagram: &Datagram) -> SocketAddr {
     let control = match datagram.port {
         Port::Control => datagram.from,
-        Port::Data => SocketAddr::new(datagram.from.ip(), datagram.from.port().saturating_sub(1)),
+        Port::Data => on_port(datagram.from, datagram.from.port().saturating_sub(1)),
     };
     canonical(control)
+}
+
+/// Returns an address on another port of the same machine.
+///
+/// The address is kept whole rather than rebuilt from its IP, because an IPv6 link-local address
+/// is only reachable with its scope, the interface it was heard on.
+fn on_port(address: SocketAddr, port: u16) -> SocketAddr {
+    let mut moved = address;
+    moved.set_port(port);
+    moved
 }
 
 /// Returns an address in the form machines are kept by.
@@ -1678,8 +1956,15 @@ fn control_address(datagram: &Datagram) -> SocketAddr {
 /// The sockets are bound to the IPv6 wildcard, so an IPv4 machine's packets arrive from its
 /// IPv4-mapped address. Keeping that form beside the plain one a user typed made a machine this
 /// side invited look like an outsider when it answered, and it was sent a goodbye.
+///
+/// An IPv6 address keeps its scope. Apple's Network MIDI invites over the link-local address
+/// Bonjour gives it, and the answer to `fe80::` with no scope goes nowhere: Audio MIDI Setup
+/// reported that the port "didn't respond to the connection request".
 fn canonical(address: SocketAddr) -> SocketAddr {
-    SocketAddr::new(address.ip().to_canonical(), address.port())
+    match address.ip().to_canonical() {
+        IpAddr::V4(v4) => SocketAddr::new(IpAddr::V4(v4), address.port()),
+        IpAddr::V6(_) => address,
+    }
 }
 
 /// Reports whether a datagram is something only a running session sends.
@@ -1715,6 +2000,62 @@ mod tests {
     /// Returns 127.0.0.1 at a port.
     fn loopback(port: u16) -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], port))
+    }
+
+    /// Proves the address a machine is answered at is the one it was heard from: an IPv4 machine
+    /// seen through a dual-stack socket by its plain address, and an IPv6 link-local one with its
+    /// scope, on the control port whichever port it sent from.
+    ///
+    /// Regression: the scope was dropped, so Apple's Network MIDI, which invites over the
+    /// link-local address Bonjour resolves, was never answered. Scope 14 stands for the interface
+    /// the invitation arrived on.
+    #[test]
+    fn a_machine_is_answered_at_the_address_it_was_heard_from() {
+        let link_local = |port: u16| {
+            SocketAddr::V6(std::net::SocketAddrV6::new(
+                "fe80::1".parse().unwrap(),
+                port,
+                0,
+                14,
+            ))
+        };
+        let cases = [
+            (
+                "IPv4 through a dual-stack socket",
+                Port::Control,
+                "[::ffff:192.0.2.10]:5004".parse().unwrap(),
+                "192.0.2.10:5004".parse().unwrap(),
+            ),
+            (
+                "link-local on the control port",
+                Port::Control,
+                link_local(5004),
+                link_local(5004),
+            ),
+            (
+                "link-local on the data port",
+                Port::Data,
+                link_local(5005),
+                link_local(5004),
+            ),
+        ];
+        for (name, port, from, want) in cases {
+            let datagram = Datagram {
+                port,
+                from,
+                bytes: Vec::new(),
+            };
+            assert_eq!(
+                control_address(&datagram),
+                want,
+                "{name}: the wrong address is answered"
+            );
+            assert_eq!(
+                on_port(control_address(&datagram), want.port() + 1),
+                on_port(want, want.port() + 1),
+                "{name}: the data port is not on the same machine and interface"
+            );
+        }
     }
 
     /// Starts a session on loopback under a policy, keeping what it delivers and what it reports.

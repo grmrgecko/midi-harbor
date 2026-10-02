@@ -14,6 +14,8 @@ use midi_harbor_core::endpoint::{EndpointKind, InvitationPolicy, NetworkSession}
 use midi_harbor_core::failure::FailureReason;
 use midi_harbor_core::ids::EndpointId;
 use midi_harbor_core::state::ConnectionPhase;
+use midi_harbor_daemon::discovery::DiscoveredPeer;
+use midi_harbor_daemon::identity::PortIdentity;
 use midi_harbor_daemon::{Daemon, DaemonError, NetworkPortChange};
 use midi_harbor_platform::fake::FakeMidiPlatform;
 use midi_harbor_platform::midi::MidiPlatform;
@@ -567,7 +569,10 @@ async fn machines_until(
 /// place, and that a machine no longer taking part cannot be disconnected again.
 ///
 /// The peer disconnected by the user is forgotten, so it is not connected to again on the next
-/// start.
+/// start, and it leaves the remembered machines with the connection that put it there.
+///
+/// Regression: the machine stayed remembered at the address it was connected at, so the network
+/// port went on offering an old connection after the far side had stopped listening there.
 #[tokio::test]
 async fn a_second_machine_joins_beside_the_first_and_each_can_be_disconnected_alone() {
     let (near, stage, far, front) = joined().await;
@@ -631,6 +636,20 @@ async fn a_second_machine_joins_beside_the_first_and_each_can_be_disconnected_al
     assert!(
         remembered.other_peers.is_empty(),
         "the machine promoted to peer is still remembered beside it: {remembered:?}"
+    );
+    let known: Vec<Vec<String>> = near
+        .read(|config, _| {
+            config
+                .peers
+                .iter()
+                .map(|known| known.addresses.clone())
+                .collect()
+        })
+        .await;
+    assert_eq!(
+        known,
+        vec![vec![to_booth.to_string()]],
+        "only the machine still connected is remembered, not the one disconnected"
     );
     let left = machines_until(&near, stage, |machines| {
         machines.len() == 1 && machines[0].joined
@@ -1384,4 +1403,234 @@ async fn a_hand_written_port_and_network_port_of_one_name_are_kept_and_reported(
             && event.detail.contains("both named 'Stage'")
     });
     assert!(reported, "the clash was not recorded in the history");
+}
+
+/// Builds an advertisement of a session as discovery reports one, since a test runner cannot be
+/// relied on to carry multicast.
+fn advertisement(
+    name: &str,
+    address: SocketAddr,
+    identity: Option<PortIdentity>,
+) -> DiscoveredPeer {
+    DiscoveredPeer {
+        id: midi_harbor_core::ids::PeerId::new(),
+        name: name.to_owned(),
+        fullname: format!("{name}._apple-midi._udp.local."),
+        addresses: vec![address.ip()],
+        port: address.port(),
+        is_self: false,
+        identity,
+    }
+}
+
+/// Starts a near daemon over a hand-written configuration whose network port Stage connects to
+/// the machine written as `peer`, the lines of one entry under `peers`. Returns the daemon, Stage
+/// and the paths, to read the configuration back from disk.
+async fn stage_connecting_to(
+    label: &str,
+    peer: &str,
+) -> (Arc<Daemon>, EndpointId, midi_harbor_core::paths::Paths) {
+    let root = common::scratch("midi-harbor-network-ports")
+        .join(format!("{label}-{}", uuid::Uuid::new_v4()));
+    let paths = midi_harbor_core::paths::Paths::rooted_at(root);
+    std::fs::create_dir_all(paths.config_dir()).expect("the configuration directory is created");
+    std::fs::write(
+        paths.config_file(),
+        format!(
+            "preferences:\n\
+             \x20 advertise_sessions: false\n\
+             endpoints:\n\
+             - name: Stage\n\
+             \x20 kind: network_port\n\
+             \x20 control_port: 0\n\
+             \x20 peer: 6f1d4c1e-3b0a-4a52-9d57-0c2f5a8e7b11\n\
+             peers:\n\
+             - id: 6f1d4c1e-3b0a-4a52-9d57-0c2f5a8e7b11\n\
+             \x20 name: Front of House\n\
+             {peer}"
+        ),
+    )
+    .expect("the configuration is written");
+    let near = Daemon::start(
+        paths.clone(),
+        Arc::new(FakeMidiPlatform::new()) as Arc<dyn MidiPlatform>,
+    )
+    .await
+    .expect("the near daemon starts over the configuration");
+    let stage = near
+        .read(|config, _| {
+            config
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.name.as_str() == "Stage")
+                .map(|endpoint| endpoint.id)
+        })
+        .await
+        .expect("Stage is loaded from the configuration");
+    (near, stage, paths)
+}
+
+/// Returns the one remembered machine, read back from disk.
+fn stored_machine(paths: &midi_harbor_core::paths::Paths) -> midi_harbor_core::config::PeerConfig {
+    midi_harbor_core::config::load(paths)
+        .expect("the configuration is read back from disk")
+        .config
+        .peers
+        .into_iter()
+        .next()
+        .expect("one machine is remembered")
+}
+
+/// Proves that a machine whose session is advertised on another port is connected to there once
+/// its link is down, with the new address stored for the next start, and that a machine
+/// carrying MIDI is left where it is (R-105).
+///
+/// A session that comes back on a port the system chose again was invited at its old port for
+/// good, although it was advertised on the new one. An advertisement naming a connected machine
+/// elsewhere may be another machine that took the name, so it moves nothing.
+#[tokio::test]
+async fn a_machine_whose_session_moved_is_followed_to_where_it_is_advertised() {
+    let (_front_machine, _, to_front) = accepting_machine("moved-front", "Front of House").await;
+    let (_booth_machine, _, to_booth) = accepting_machine("moved-booth", "Booth").await;
+    // Where Front of House was when Stage connected to it. Nothing listens there now.
+    let gone = free_pair();
+    let (near, stage, paths) = stage_connecting_to(
+        "moved",
+        &format!(
+            "\x20 addresses: [\"127.0.0.1:{gone}\"]\n\
+             \x20 advertised_as: Front of House\n"
+        ),
+    )
+    .await;
+
+    // Its link down, the machine is followed to the port its session is advertised on.
+    near.follow_advertised(&[advertisement("Front of House", to_front, None)])
+        .await;
+    assert!(
+        connected(&near, stage).await,
+        "Stage did not connect to the session where it is advertised now"
+    );
+    assert_eq!(
+        stored_machine(&paths).addresses,
+        vec![to_front.to_string()],
+        "the new address is not stored, so a restart would invite the old one"
+    );
+
+    // Carrying MIDI, it is left where it is.
+    near.follow_advertised(&[advertisement("Front of House", to_booth, None)])
+        .await;
+    let machines = machines_until(&near, stage, |machines| all_joined(machines, &[to_front])).await;
+    assert!(
+        all_joined(&machines, &[to_front]),
+        "a connected machine was moved by an advertisement: {machines:?}"
+    );
+    assert_eq!(
+        stored_machine(&paths).addresses,
+        vec![to_front.to_string()],
+        "a connected machine's stored address was changed by an advertisement"
+    );
+}
+
+/// Proves that a trusted machine is followed to another host only by the session that proves
+/// it is the network port connected to before, and that the trust goes with it (R-106).
+///
+/// Trust is held by host, and an advertisement can claim any key. A machine claiming Front of
+/// House's key from another host is asked to sign a challenge with it; Booth cannot, and is not
+/// followed. The IPv6 loopback address stands for the host Front of House left, and the IPv4 one
+/// for the host it is on now.
+#[tokio::test]
+async fn a_trusted_machine_is_followed_to_another_host_once_it_proves_which_port_it_is() {
+    let (front_machine, front, to_front) =
+        accepting_machine("proved-front", "Front of House").await;
+    let (_booth_machine, _, to_booth) = accepting_machine("proved-booth", "Booth").await;
+    let front_of_house = PortIdentity::new(&front_machine.identity_key(), front)
+        .expect("Front of House has a key and an identifier");
+    let gone = free_pair();
+    let held = format!("[::1]:{gone}");
+    let (near, stage, paths) = stage_connecting_to(
+        "proved",
+        &format!(
+            "\x20 addresses: [\"{held}\"]\n\
+             \x20 trusted: true\n\
+             \x20 advertised_as: Front of House\n\
+             \x20 key: {}\n\
+             \x20 port_id: {front}\n",
+            front_machine.identity_key()
+        ),
+    )
+    .await;
+
+    // Booth advertises itself as Front of House's port. It cannot prove it.
+    near.follow_advertised(&[advertisement(
+        "Front of House",
+        to_booth,
+        Some(front_of_house),
+    )])
+    .await;
+    assert_eq!(
+        stored_machine(&paths).addresses,
+        vec![held],
+        "a machine that did not prove the key was followed, and trusted"
+    );
+
+    // Front of House, renamed and on another host, proves it.
+    near.follow_advertised(&[advertisement("Main Stage", to_front, Some(front_of_house))])
+        .await;
+    assert!(
+        connected(&near, stage).await,
+        "Stage did not follow the port that proved itself"
+    );
+    let stored = stored_machine(&paths);
+    assert_eq!(
+        (stored.addresses, stored.advertised_as, stored.trusted),
+        (
+            vec![to_front.to_string()],
+            Some("Main Stage".to_owned()),
+            true
+        ),
+        "the proved port's new address and name are not stored with its trust"
+    );
+}
+
+/// Proves that the key and identifier a session advertises are kept with the machine only once
+/// the port at the address connected to proves them (R-106).
+///
+/// An advertisement can name any address, so a forged one at a trusted machine's address would
+/// otherwise plant a key for its forger to prove later from anywhere.
+#[tokio::test]
+async fn a_machines_key_is_kept_only_once_proved_where_it_is_connected() {
+    let (front_machine, front, to_front) =
+        accepting_machine("learnt-front", "Front of House").await;
+    let (booth_machine, _, _) = accepting_machine("learnt-booth", "Booth").await;
+    let front_of_house = PortIdentity::new(&front_machine.identity_key(), front)
+        .expect("Front of House has a key and an identifier");
+    let forged = PortIdentity::new(&booth_machine.identity_key(), front).expect("Booth has a key");
+    let (near, stage, paths) =
+        stage_connecting_to("learnt", &format!("\x20 addresses: [\"{to_front}\"]\n")).await;
+    assert!(
+        connected(&near, stage).await,
+        "Stage connects to Front of House where it is remembered"
+    );
+
+    near.follow_advertised(&[advertisement("Front of House", to_front, Some(forged))])
+        .await;
+    let stored = stored_machine(&paths);
+    assert_eq!(
+        (stored.advertised_as.as_deref(), stored.key, stored.port_id),
+        (Some("Front of House"), None, None),
+        "the session's name is kept, and a key the port did not prove is not"
+    );
+
+    near.follow_advertised(&[advertisement(
+        "Front of House",
+        to_front,
+        Some(front_of_house),
+    )])
+    .await;
+    let stored = stored_machine(&paths);
+    assert_eq!(
+        (stored.key, stored.port_id),
+        (Some(front_machine.identity_key()), Some(front)),
+        "the key and identifier the port proved are not kept"
+    );
 }

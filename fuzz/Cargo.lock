@@ -308,7 +308,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "midi-harbor-blemidi"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "midi-harbor-core",
  "thiserror",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "midi-harbor-core"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "directories",
  "jiff",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "midi-harbor-rtpmidi"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "midi-harbor-core",
  "thiserror",

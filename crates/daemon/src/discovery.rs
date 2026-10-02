@@ -14,7 +14,8 @@
 //! immediately by both browsers; advertising the same service through `mdns-sd` was seen by
 //! neither. Browsing was never the problem.
 
-use midi_harbor_core::ids::PeerId;
+use crate::identity::PortIdentity;
+use midi_harbor_core::ids::{EndpointId, PeerId};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +25,15 @@ use tracing::{debug, info};
 
 /// The service type Apple's Network MIDI advertises and browses for.
 pub const SERVICE_TYPE: &str = "_apple-midi._udp.local.";
+
+/// The TXT property holding the public key of the daemon advertising a session, in hexadecimal.
+///
+/// Only Midi Harbor publishes it, which is how a session is known to answer the identity
+/// exchange before it is sent a packet no other implementation understands (R-106).
+pub const KEY_PROPERTY: &str = "mhkey";
+
+/// The TXT property holding the identifier of the network port a session is.
+pub const PORT_PROPERTY: &str = "mhport";
 
 /// How long a peer may go unseen before it is dropped from the list.
 pub const PEER_TTL: Duration = Duration::from_secs(120);
@@ -59,12 +69,103 @@ pub struct DiscoveredPeer {
     pub port: u16,
     /// Set when this is our own advertisement reflected back.
     pub is_self: bool,
+    /// Which Midi Harbor network port it says it is. Unproven: an advertisement can say anything.
+    pub identity: Option<PortIdentity>,
+}
+
+/// What a network port holds about a machine it connects to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Followed<'a> {
+    /// The address it is connected to at.
+    pub held: SocketAddr,
+    /// Whether its invitations are accepted without asking.
+    pub trusted: bool,
+    /// The session name it was advertising when last seen at its address.
+    pub advertised_as: Option<&'a str>,
+    /// Which network port it proved it is, when it is a Midi Harbor.
+    pub identity: Option<PortIdentity>,
+}
+
+/// What the advertisements ask to be done about a machine a network port connects to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Step {
+    /// A session is advertised where the machine is. Keep its name when that is given, and its
+    /// identity once it proves it there.
+    Learn {
+        /// The session's name, when it is not the one held.
+        name: Option<String>,
+        /// The identity it advertises, when it is not the one held.
+        identity: Option<PortIdentity>,
+    },
+    /// The machine's session is advertised somewhere else. Connect to it there, once it proves
+    /// `prove` there when that is set.
+    Move {
+        /// Where it is advertised now.
+        to: SocketAddr,
+        /// The name it is advertised under now.
+        name: String,
+        /// What it must prove at the new address before it is followed.
+        prove: Option<PortIdentity>,
+    },
+}
+
+/// Decides what the advertisements ask to be done about one machine.
+///
+/// A machine that proved which network port it is, is that port wherever it is advertised and
+/// whatever it is called, and nothing else is: a port deleted and made again is another port. It
+/// is followed to another host once it proves itself there. Any other machine is known by its
+/// session name alone, which proves nothing. It is followed to a new port on the host it was on,
+/// and to another host only when it is not trusted: trust is held by host, so following a name
+/// would let whichever machine took it in unasked.
+pub fn next_step(known: &Followed<'_>, advertised: &[DiscoveredPeer]) -> Option<Step> {
+    let advertised = || advertised.iter().filter(|peer| !peer.is_self);
+
+    // A session where the machine is says what it is called and which port it is.
+    if let Some(here) = advertised().find(|peer| peer.is_at(known.held)) {
+        let name = (known.advertised_as != Some(here.name.as_str())).then(|| here.name.clone());
+        let identity = here.identity.filter(|_| here.identity != known.identity);
+        return (name.is_some() || identity.is_some()).then_some(Step::Learn { name, identity });
+    }
+
+    // Otherwise it may be advertised somewhere else.
+    let moved = match known.identity {
+        Some(identity) => advertised().find(|peer| peer.identity == Some(identity)),
+        None => advertised().find(|peer| known.advertised_as == Some(peer.name.as_str())),
+    }?;
+    let name = moved.name.clone();
+    if moved.is_on(known.held.ip()) {
+        return Some(Step::Move {
+            to: SocketAddr::new(known.held.ip(), moved.port),
+            name,
+            prove: None,
+        });
+    }
+    if known.identity.is_none() && known.trusted {
+        return None;
+    }
+    Some(Step::Move {
+        to: moved.address()?,
+        name,
+        prove: known.identity,
+    })
 }
 
 impl DiscoveredPeer {
     /// Returns the best address to reach this peer on.
     pub fn address(&self) -> Option<SocketAddr> {
         crate::net::choose_peer_address(&self.addresses, self.port)
+    }
+
+    /// Reports whether this session is advertised at `address`.
+    pub fn is_at(&self, address: SocketAddr) -> bool {
+        self.port == address.port() && self.is_on(address.ip())
+    }
+
+    /// Reports whether `host` is one of the addresses this session is advertised on.
+    fn is_on(&self, host: IpAddr) -> bool {
+        self.addresses
+            .iter()
+            .any(|address| address.to_canonical() == host.to_canonical())
     }
 
     /// Returns a label that distinguishes this peer from another with the same name.
@@ -100,6 +201,7 @@ impl PeerTable {
                 existing.addresses = peer.addresses;
                 existing.port = peer.port;
                 existing.name = peer.name;
+                existing.identity = peer.identity;
             }
             None => {
                 let _ = self.peers.insert(peer.fullname.clone(), peer);
@@ -159,11 +261,16 @@ pub struct Discovery {
     advertised: Arc<Mutex<Vec<(String, u16)>>>,
     /// The running advertisements, keyed by the name each publishes.
     services: Mutex<HashMap<String, Advertisement>>,
+    /// Notified each time a session is resolved or goes, so what follows sessions looks again.
+    changed: Arc<tokio::sync::Notify>,
+    /// This daemon's public key in hexadecimal, published with every session it advertises.
+    key: String,
 }
 
 impl Discovery {
-    /// Starts the responder and begins browsing.
-    pub fn start() -> Result<Arc<Self>, DiscoveryError> {
+    /// Starts the responder and begins browsing. `key` is this daemon's public key, published
+    /// with every session it advertises.
+    pub fn start(key: &[u8]) -> Result<Arc<Self>, DiscoveryError> {
         let daemon = mdns_sd::ServiceDaemon::new()
             .map_err(|error| DiscoveryError::Start(error.to_string()))?;
 
@@ -172,6 +279,8 @@ impl Discovery {
             table: Arc::new(Mutex::new(PeerTable::default())),
             advertised: Arc::new(Mutex::new(Vec::new())),
             services: Mutex::new(HashMap::new()),
+            changed: Arc::new(tokio::sync::Notify::new()),
+            key: hex::encode(key),
         });
 
         let receiver = discovery
@@ -181,9 +290,10 @@ impl Discovery {
 
         let table = Arc::clone(&discovery.table);
         let advertised = Arc::clone(&discovery.advertised);
+        let changed = Arc::clone(&discovery.changed);
         std::thread::Builder::new()
             .name("mdns-browse".to_owned())
-            .spawn(move || browse_loop(receiver, table, advertised))
+            .spawn(move || browse_loop(receiver, table, advertised, changed))
             .map_err(|error| DiscoveryError::Start(error.to_string()))?;
 
         Ok(discovery)
@@ -192,8 +302,10 @@ impl Discovery {
     /// Advertises a session so other machines can find it.
     ///
     /// Registered through the platform responder rather than the pure-Rust one, because the
-    /// latter announces once and then stops answering queries from other machines.
-    pub fn advertise(&self, name: &str, port: u16) -> Result<(), DiscoveryError> {
+    /// latter announces once and then stops answering queries from other machines. This
+    /// daemon's key and the network port's identifier `id` are published with it, so another
+    /// Midi Harbor knows which port the session is and that it can be asked to prove it.
+    pub fn advertise(&self, name: &str, port: u16, id: EndpointId) -> Result<(), DiscoveryError> {
         // Remembering what we publish is what lets our own records be recognised coming back.
         // Comparing against the machine name would not: a session advertises its own name.
         if let Ok(mut advertised) = self.advertised.lock() {
@@ -206,12 +318,17 @@ impl Discovery {
 
         let thread_running = Arc::clone(&running);
         let thread_name = name.to_owned();
+        let properties = vec![
+            (KEY_PROPERTY.to_owned(), self.key.clone()),
+            (PORT_PROPERTY.to_owned(), id.to_string()),
+        ];
         std::thread::Builder::new()
             .name(format!("mdns-advertise-{name}"))
             .spawn(move || {
                 midi_harbor_platform::responder::advertise(
                     &thread_name,
                     port,
+                    &properties,
                     &thread_running,
                     &ready,
                 );
@@ -268,6 +385,13 @@ impl Discovery {
         names
     }
 
+    /// Waits until a session has been resolved or has gone since this was last waited on.
+    ///
+    /// A change while nothing was waiting is not missed: the next wait returns at once.
+    pub async fn changed(&self) {
+        self.changed.notified().await;
+    }
+
     /// Returns the peers a user may connect to.
     pub fn peers(&self) -> Vec<(DiscoveredPeer, String)> {
         match self.table.lock() {
@@ -282,6 +406,7 @@ fn browse_loop(
     receiver: mdns_sd::Receiver<mdns_sd::ServiceEvent>,
     table: Arc<Mutex<PeerTable>>,
     advertised: Arc<Mutex<Vec<(String, u16)>>>,
+    changed: Arc<tokio::sync::Notify>,
 ) {
     while let Ok(event) = receiver.recv() {
         match event {
@@ -301,6 +426,10 @@ fn browse_loop(
                         is_own_record(&poisoned.into_inner(), &local, &addresses, port)
                     }
                 };
+                let identity = info
+                    .get_property_val_str(KEY_PROPERTY)
+                    .zip(info.get_property_val_str(PORT_PROPERTY))
+                    .and_then(|(key, port)| PortIdentity::from_text(key, port));
                 let peer = DiscoveredPeer {
                     id: PeerId::new(),
                     is_self,
@@ -308,6 +437,7 @@ fn browse_loop(
                     fullname: info.get_fullname().to_owned(),
                     addresses,
                     port,
+                    identity,
                 };
                 debug!(peer = %peer.fullname, own = peer.is_self, "resolved network peer");
 
@@ -315,11 +445,17 @@ fn browse_loop(
                     Ok(mut table) => table.insert(peer),
                     Err(poisoned) => poisoned.into_inner().insert(peer),
                 }
+                changed.notify_one();
             }
-            mdns_sd::ServiceEvent::ServiceRemoved(_, fullname) => match table.lock() {
-                Ok(mut table) => table.remove(&fullname),
-                Err(poisoned) => poisoned.into_inner().remove(&fullname),
-            },
+            mdns_sd::ServiceEvent::ServiceRemoved(_, fullname) => {
+                match table.lock() {
+                    Ok(mut table) => table.remove(&fullname),
+                    Err(poisoned) => poisoned.into_inner().remove(&fullname),
+                }
+                // A session renamed is advertised under its new name before the old one is
+                // withdrawn. Until then the old one says the port is still where it was.
+                changed.notify_one();
+            }
             // A service that is found but never resolves is invisible to the user, so the two
             // stages are logged separately: they fail for different reasons.
             mdns_sd::ServiceEvent::ServiceFound(kind, fullname) => {
@@ -341,7 +477,7 @@ fn instance_name(fullname: &str) -> &str {
 }
 
 /// Returns every address this machine's interfaces hold, loopback included.
-fn local_addresses() -> Vec<IpAddr> {
+pub(crate) fn local_addresses() -> Vec<IpAddr> {
     match if_addrs::get_if_addrs() {
         Ok(interfaces) => interfaces.iter().map(if_addrs::Interface::ip).collect(),
         Err(error) => {
@@ -385,6 +521,7 @@ mod tests {
             addresses: vec![at(last_octet)],
             port: 5004,
             is_self,
+            identity: None,
         }
     }
 
@@ -428,6 +565,97 @@ mod tests {
                 is_own_record(&advertised, &local, &[address], port),
                 want,
                 "{name}: recognised wrongly as our own record or as a peer"
+            );
+        }
+    }
+
+    /// Proves what the advertisements ask to be done about a machine a network port connects
+    /// to. A session where it is gives it its name, and its identity to prove. A session by its
+    /// name on another port of its host is followed. On another host it is followed by name only
+    /// when it is not trusted, and by identity whatever it is called, once proved. A machine with
+    /// an identity is never followed by name: a port deleted and made again under the same name
+    /// is another port.
+    #[test]
+    fn an_advertisement_says_where_a_machine_is_and_what_it_must_prove() {
+        let held = SocketAddr::new(at(13), 5004);
+        let port_a = PortIdentity {
+            key: [1; 32],
+            port: EndpointId::from_bytes([2; 16]),
+        };
+        let port_b = PortIdentity {
+            port: EndpointId::from_bytes([3; 16]),
+            ..port_a
+        };
+        let session = |name: &str, last_octet: u8, port: u16, identity| DiscoveredPeer {
+            port,
+            identity,
+            ..peer(name, name, last_octet, false)
+        };
+        let known = |trusted, advertised_as, identity| Followed {
+            held,
+            trusted,
+            advertised_as,
+            identity,
+        };
+        let moved = |last_octet: u8, port: u16, name: &str, prove| {
+            Some(Step::Move {
+                to: SocketAddr::new(at(last_octet), port),
+                name: name.to_owned(),
+                prove,
+            })
+        };
+        let cases = [
+            (
+                "where it is, under the name held",
+                known(false, Some("Pad"), None),
+                session("Pad", 13, 5004, None),
+                None,
+            ),
+            (
+                "where it is, not yet named, advertising an identity",
+                known(false, None, None),
+                session("Pad", 13, 5004, Some(port_a)),
+                Some(Step::Learn {
+                    name: Some("Pad".to_owned()),
+                    identity: Some(port_a),
+                }),
+            ),
+            (
+                "by name on another port of its host, trusted",
+                known(true, Some("Pad"), None),
+                session("Pad", 13, 5010, None),
+                moved(13, 5010, "Pad", None),
+            ),
+            (
+                "by name on another host, not trusted",
+                known(false, Some("Pad"), None),
+                session("Pad", 14, 5004, None),
+                moved(14, 5004, "Pad", None),
+            ),
+            (
+                "by name on another host, trusted",
+                known(true, Some("Pad"), None),
+                session("Pad", 14, 5004, None),
+                None,
+            ),
+            (
+                "by identity on another host, renamed, trusted",
+                known(true, Some("Pad"), Some(port_a)),
+                session("Stage Pad", 14, 5004, Some(port_a)),
+                moved(14, 5004, "Stage Pad", Some(port_a)),
+            ),
+            (
+                "another port under the name of one with an identity",
+                known(false, Some("Pad"), Some(port_a)),
+                session("Pad", 13, 5010, Some(port_b)),
+                None,
+            ),
+        ];
+        for (name, known, advertised, want) in cases {
+            assert_eq!(
+                next_step(&known, &[advertised]),
+                want,
+                "{name}: the wrong thing is asked for"
             );
         }
     }

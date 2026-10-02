@@ -28,6 +28,7 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 | [015-mac-menus](015-mac-menus/spec.md) | The menus on macOS: File, Edit, View, Window and Help |
 | [016-app-store-submission](016-app-store-submission/spec.md) | Building the package App Store Connect takes |
 | [017-appimage](017-appimage/spec.md) | The AppImage for Linux, and registering the daemon from it |
+| [018-remembered-machines](018-remembered-machines/spec.md) | Machines a network port connected to: forgetting old connections, following a session that moved, proving which port a session is; answering Apple over a link-local address |
 
 ## Where each number is
 
@@ -144,3 +145,10 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 - **Success criteria**: SC-I01
 - **Research**: R-104
 - **Tasks**: T246–T248
+
+### 018-remembered-machines
+
+- **Requirements**: FR-P01, FR-P02, FR-P03, FR-P04, FR-P05, FR-P06, FR-P07
+- **Success criteria**: SC-P01, SC-P02
+- **Research**: R-105–R-107
+- **Tasks**: T249–T252

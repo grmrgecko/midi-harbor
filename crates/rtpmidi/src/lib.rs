@@ -8,11 +8,13 @@
 
 pub mod clock;
 pub mod control;
+pub mod identity;
 pub mod journal;
 pub mod packet;
 pub mod session;
 
 pub use clock::{ClockAction, ClockSync};
 pub use control::{ControlPacket, Handshake, ParseError, SessionCommand};
+pub use identity::{IdentityError, IdentityPacket};
 pub use packet::{PacketError, RtpMidiPacket, SysExPart, SysExSegment, TimedMessage};
 pub use session::{Action, Phase, Port, Role, Session, SessionFailure};

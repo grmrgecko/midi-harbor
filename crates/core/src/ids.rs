@@ -32,6 +32,16 @@ macro_rules! uuid_id {
             pub fn from_uuid(value: Uuid) -> Self {
                 Self(value)
             }
+
+            /// Returns the identifier's sixteen bytes, as it travels in a packet.
+            pub fn to_bytes(&self) -> [u8; 16] {
+                *self.0.as_bytes()
+            }
+
+            /// Reads an identifier from its sixteen bytes.
+            pub fn from_bytes(bytes: [u8; 16]) -> Self {
+                Self(Uuid::from_bytes(bytes))
+            }
         }
 
         impl Default for $name {

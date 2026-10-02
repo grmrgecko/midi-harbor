@@ -39,6 +39,9 @@ Peer {
     addresses:     Vec<SocketAddr>   // may be several; may change over time
     source:        PeerSource        // Discovered | Manual
     trusted:       bool              // "always accept from this peer"
+    advertised_as: Option<String>    // the session name advertised at its address; followed when it moves (R-105)
+    key:           Option<String>    // its daemon's public key, once proved (R-106)
+    port_id:       Option<EndpointId> // which of that daemon's network ports it is, once proved (R-106)
     last_seen:     Option<Timestamp>
     is_self:       bool              // never offered to the user (edge case)
 }
