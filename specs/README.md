@@ -142,10 +142,10 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 
 ### 017-appimage
 
-- **Requirements**: FR-I01, FR-I02, FR-I03, FR-I04
+- **Requirements**: FR-I01, FR-I02, FR-I03, FR-I04, FR-I05
 - **Success criteria**: SC-I01
-- **Research**: R-104
-- **Tasks**: T246–T248
+- **Research**: R-104, R-109
+- **Tasks**: T246–T248, T254
 
 ### 018-remembered-machines
 

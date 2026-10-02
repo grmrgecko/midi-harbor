@@ -217,6 +217,16 @@ pub fn detect() -> Result<Box<dyn ServiceManager>, ServiceError> {
     }
 }
 
+/// Returns the AppImage file this program runs from, and where its runtime mounted it, when it
+/// runs from one.
+#[cfg(target_os = "linux")]
+pub fn running_appimage() -> Option<(PathBuf, PathBuf)> {
+    let running = std::env::current_exe().ok()?;
+    let appdir = std::env::var_os("APPDIR");
+    let file = appimage_file(&running, std::env::var_os("APPIMAGE"), appdir.clone())?;
+    Some((file, PathBuf::from(appdir?)))
+}
+
 /// Returns the AppImage file the running executable was started from, if it was.
 ///
 /// The AppImage runtime sets `APPIMAGE` to the file and `APPDIR` to where it mounted it, and

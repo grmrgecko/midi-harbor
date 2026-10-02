@@ -7,6 +7,8 @@ mod app;
 #[cfg(target_os = "macos")]
 pub mod app_store;
 mod client;
+#[cfg(target_os = "linux")]
+mod desktop;
 mod dialogs;
 pub mod format;
 mod onboarding;
@@ -39,6 +41,9 @@ pub fn run(socket: Option<std::path::PathBuf>) -> Result<(), GuiError> {
     let settings = Settings::default().size(Size::new(WINDOW_WIDTH, WINDOW_HEIGHT));
     #[cfg(target_os = "macos")]
     let settings = macos(settings);
+    // Before the window opens, so the desktop finds the entry when it looks for the icon.
+    #[cfg(target_os = "linux")]
+    desktop::integrate();
     cosmic::app::run::<app::App>(settings, socket)?;
     Ok(())
 }

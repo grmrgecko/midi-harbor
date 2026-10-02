@@ -116,3 +116,44 @@ from its next start.
   machine shut down, and started from the AppImage 35 seconds later, when SDDM logged the user in.
 
 **Not checked**: an arm64 machine outside Docker.
+
+---
+
+## R-109: The AppImage's window showed the generic Wayland icon
+
+**Status**: **FIXED** (2026-10-02), on X11. Built as T254. Not yet seen on a Wayland desktop.
+
+The owner reported that the window of the AppImage showed the Wayland icon instead of Midi
+Harbor's. A Wayland desktop does not take an icon from the window. It takes the window's
+application ID, `com.mrgeckosmedia.MidiHarbor`, and looks for a desktop entry of that name in the
+XDG data directories. A package installs one in `/usr/share/applications`. The AppImage carries
+the entry and the icon inside its own tree, where no desktop looks unless an integration tool such
+as AppImageLauncher copies them out, so the lookup found nothing. R-104 checked the icon only for
+an AppImage launched through an entry such a tool had installed.
+
+**Fix.** Run from an AppImage, the window installs the entry and the icon itself before it opens:
+`com.mrgeckosmedia.MidiHarbor.desktop` under `$XDG_DATA_HOME/applications` and the SVG under
+`icons/hicolor/scalable/apps`, read from the AppImage's own tree. `Exec` is rewritten to the
+AppImage file, quoted as the Desktop Entry Specification requires, and `TryExec` names the file,
+so a desktop drops the entry once the AppImage is deleted, which is how an AppImage is removed.
+Each file is written only when it differs, so an AppImage that has moved is followed and one
+that has not touches nothing.
+
+**Not over a package.** An entry in the user's directory takes precedence over the system's. With
+a package installed as well, it would point the package's menu item at the AppImage, so nothing is
+installed when a directory in `XDG_DATA_DIRS` already holds the entry. The package's entry gives
+the window its icon in that case.
+
+**The other way considered.** The `xdg-toplevel-icon-v1` protocol lets a window hand the
+compositor an icon. Few compositors implement it and the pinned libcosmic's winit does not, and it
+would not put the AppImage in the application menu.
+
+**Checked** on Arch Linux under XFCE on X11, with the program run from a directory laid out as the
+AppImage runtime mounts it, in a path holding a space, and `APPIMAGE` and `APPDIR` set as the
+runtime sets them. The entry installed passed `desktop-file-validate`, and the taskbar, which had
+shown the window with no icon, showed Midi Harbor's. On the first run the icon was not written,
+because that machine's `icons/hicolor` directory belonged to root from an earlier test; the entry
+was installed without it, and the icon followed once the directory was the user's.
+
+**Not covered:** a Wayland desktop, which is where it was reported, and a real AppImage built by
+the release.

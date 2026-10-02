@@ -38,7 +38,9 @@ BlueZ. Installing a package does not start anything. Each user who wants the dae
 **Any other Linux distribution**: `Midi-Harbor-<version>-<x86_64|aarch64>.AppImage` runs without
 installing. Keep it where it will stay, such as `~/Applications`, make it executable with
 `chmod +x`, and open it; it shows the graphical interface, which offers to start the daemon at
-login. The service runs the AppImage file itself, so moving a newer one over it updates the
+login. Opening it also adds Midi Harbor to your applications, with its icon, by writing a desktop
+entry and the icon under `~/.local/share`; the entry goes away by itself once the AppImage file
+is deleted. The service runs the AppImage file itself, so moving a newer one over it updates the
 daemon at its next start; copying into it fails while the daemon runs. A newer one saved under
 another name leaves the registration stale until it is opened and set up again. The AppImage
 needs FUSE, which desktop distributions include, and a desktop's own libraries: ALSA, D-Bus and

@@ -62,6 +62,10 @@ artifacts, and the release publishes them.
   the unit is stopped.
 - **FR-I02**: The release MUST build an AppImage for each Linux architecture it builds, from the
   same binary as the packages.
+- **FR-I05**: Run from an AppImage, the window MUST install the AppImage's desktop entry and icon
+  for the user, starting the AppImage file, so the desktop shows its icon and lists it among the
+  applications. It MUST NOT do so where a package already provides the entry, and the entry MUST
+  stop being offered once the AppImage file is gone.
 - **FR-I03**: The AppImage MUST run on the distributions the packages do, needing from the host only
   glibc, FUSE and what a desktop already has.
 
