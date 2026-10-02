@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 /// The desktop entry's name without its extension, which is the window's application ID.
 const ID: &str = "com.mrgeckosmedia.MidiHarbor";
 
+/// The icon theme every desktop falls back to, under a data directory.
+const THEME: &str = "icons/hicolor";
+
 /// Installs this AppImage's desktop entry and icon for the user, when the program runs from one.
 ///
 /// A failure costs the icon and nothing else, so it is logged and the window opens regardless.
@@ -22,13 +25,28 @@ pub fn integrate() {
         return;
     };
     match install(&appimage, &appdir, &data_home, &data_dirs()) {
-        Ok(true) => tracing::info!(appimage = %appimage.display(), "installed the desktop entry"),
-        Ok(false) => {}
+        Ok(Written { entry, icon }) => {
+            if icon {
+                announce_icon(&data_home.join(THEME));
+            }
+            if entry || icon {
+                tracing::info!(appimage = %appimage.display(), "installed the desktop entry");
+            }
+        }
         Err(error) => tracing::debug!(error = %error, "could not install the desktop entry"),
     }
 }
 
-/// Installs the entry and icon under `data_home`, and reports whether anything was written.
+/// Which of the two files an installation wrote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Written {
+    /// The desktop entry.
+    entry: bool,
+    /// The icon.
+    icon: bool,
+}
+
+/// Installs the entry and icon under `data_home`, and reports which were written.
 ///
 /// Nothing is installed where a package already provides the entry in `data_dirs`: one under
 /// the user's directory takes precedence, and would point the package's menu item at the
@@ -38,17 +56,17 @@ fn install(
     appdir: &Path,
     data_home: &Path,
     data_dirs: &[PathBuf],
-) -> std::io::Result<bool> {
+) -> std::io::Result<Written> {
     let entry_name = format!("{ID}.desktop");
     let icon_name = format!("{ID}.svg");
     if data_dirs
         .iter()
         .any(|dir| dir.join("applications").join(&entry_name).exists())
     {
-        return Ok(false);
+        return Ok(Written::default());
     }
     let Some(target) = appimage.to_str() else {
-        return Ok(false);
+        return Ok(Written::default());
     };
 
     // Write each only when it differs, so an AppImage that has not moved touches nothing.
@@ -63,12 +81,39 @@ fn install(
         entry.as_bytes(),
     )?;
     let wrote_icon = write_if_changed(
-        &data_home
-            .join("icons/hicolor/scalable/apps")
-            .join(&icon_name),
+        &data_home.join(THEME).join("scalable/apps").join(&icon_name),
         &icon,
     )?;
-    Ok(wrote_entry || wrote_icon)
+    Ok(Written {
+        entry: wrote_entry,
+        icon: wrote_icon,
+    })
+}
+
+/// Tells desktops already running that the icon theme under `theme` has a new icon.
+///
+/// A shell reads the theme's directories when it starts and does not look again. Plasma, running
+/// since before the icon's directory existed, found the desktop entry and drew a blank where
+/// the icon belonged. KDE reloads its icons on the signal sent here, and loaders that compare
+/// times reload when the theme's directory is newer than what they read. Neither is needed for
+/// the icon to be there at the next login, so a failure is not reported.
+fn announce_icon(theme: &Path) {
+    if let Ok(directory) = std::fs::File::open(theme) {
+        let _ = directory.set_modified(std::time::SystemTime::now());
+    }
+    // The signal KDE's own programs send after changing icons. Group 0 is the desktop's.
+    let _ = std::process::Command::new("dbus-send")
+        .args([
+            "--session",
+            "--type=signal",
+            "/KIconLoader",
+            "org.kde.KIconLoader.iconChanged",
+            "int32:0",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 /// Writes `contents` to `path` unless the file already holds them, and reports whether it wrote.
@@ -218,9 +263,13 @@ mod tests {
         let home = root.join("home");
         let installed = home.join("applications").join(&entry);
 
-        assert!(
+        assert_eq!(
             install(&appimage, &appdir, &home, &[]).unwrap(),
-            "the first run must install the entry"
+            Written {
+                entry: true,
+                icon: true
+            },
+            "the first run must install the entry and the icon"
         );
         assert!(
             std::fs::read_to_string(&installed)
@@ -234,8 +283,9 @@ mod tests {
                 .exists(),
             "the icon the entry names must be installed with it"
         );
-        assert!(
-            !install(&appimage, &appdir, &home, &[]).unwrap(),
+        assert_eq!(
+            install(&appimage, &appdir, &home, &[]).unwrap(),
+            Written::default(),
             "a second run of the same AppImage must write nothing"
         );
 
@@ -244,8 +294,9 @@ mod tests {
         std::fs::create_dir_all(system.join("applications")).unwrap();
         std::fs::write(system.join("applications").join(&entry), "").unwrap();
         let other_home = root.join("other-home");
-        assert!(
-            !install(&appimage, &appdir, &other_home, &[system]).unwrap(),
+        assert_eq!(
+            install(&appimage, &appdir, &other_home, &[system]).unwrap(),
+            Written::default(),
             "an entry a package provides must not be shadowed"
         );
         assert!(

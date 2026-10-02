@@ -121,7 +121,8 @@ from its next start.
 
 ## R-109: The AppImage's window showed the generic Wayland icon
 
-**Status**: **FIXED** (2026-10-02), on X11. Built as T254. Not yet seen on a Wayland desktop.
+**Status**: **FIXED** (2026-10-02), on X11; on Plasma under Wayland the entry is found and the
+icon's redraw in a running shell is not yet confirmed. Built as T254.
 
 The owner reported that the window of the AppImage showed the Wayland icon instead of Midi
 Harbor's. A Wayland desktop does not take an icon from the window. It takes the window's
@@ -155,5 +156,16 @@ shown the window with no icon, showed Midi Harbor's. On the first run the icon w
 because that machine's `icons/hicolor` directory belonged to root from an earlier test; the entry
 was installed without it, and the icon followed once the directory was the user's.
 
-**Not covered:** a Wayland desktop, which is where it was reported, and a real AppImage built by
-the release.
+**On Plasma, a blank icon.** With the released AppImage on Plasma 6 under Wayland the generic
+icon was gone and a blank stood in its place. The entry and the icon were both installed, a new
+KDE process resolved the icon's name to the file (`kiconfinder6`), and KDE's renderer drew it
+correctly (`ksvgtopng`). The shell itself had been running for two weeks and had read the icon
+theme's directories when it started, before `hicolor/scalable/apps` existed under the user's data
+directory, so it found the entry and no icon. After writing the icon the window now sends
+`org.kde.KIconLoader.iconChanged` on the session bus, which is what KDE's own programs send to
+have every running program reload its icons, and sets the theme directory's modification time
+for loaders that compare times. Both are done only when the icon was written.
+
+**Not covered:** whether the shell redraws the icon on that signal without the window being
+opened again, which only the owner's desktop can show, and a real AppImage carrying this last
+change.
