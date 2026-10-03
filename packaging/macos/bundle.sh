@@ -102,6 +102,16 @@ if [ -n "$helper" ]; then
         identity=${MIDI_HARBOR_SIGNING_IDENTITY:--}
     fi
 
+    # Refuse private window server calls: App Review rejects a binary that so much as imports
+    # one, and a dependency's macOS backend brought one in before (research R-110).
+    for executable in midi-harbor midi-harbor-daemon; do
+        private=$(nm -u -arch all "$app/Contents/MacOS/$executable" | grep '_CGS[A-Z]' | sort -u)
+        if [ -n "$private" ]; then
+            echo "$executable imports private APIs the App Store rejects:" $private >&2
+            exit 1
+        fi
+    done
+
     # Sign, with no extended attributes: App Store Connect refuses a package holding a file
     # marked with com.apple.quarantine, as a downloaded profile is (research R-103).
     xattr -cr "$app"

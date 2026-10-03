@@ -137,8 +137,8 @@ exception is 014, whose task list started again at T001: its T001 to T034 are ci
 
 - **Requirements**: FR-S01, FR-S02, FR-S03
 - **Success criteria**: SC-S01
-- **Research**: R-103
-- **Tasks**: T245
+- **Research**: R-103, R-110
+- **Tasks**: T245, T255
 
 ### 017-appimage
 

@@ -57,3 +57,43 @@ quarantine.
 
 **Not checked**: an upload after the quarantine fix; the expanded package carries no attribute but
 `com.apple.provenance`.
+
+---
+
+## R-110: What App Review's automated check refused
+
+**Status**: **VERIFIED** (2026-10-03) locally; resubmitted the same day, verdict pending. Built as T255.
+
+The first submission came back with two automated messages before any person reviewed it.
+
+**The private API was winit's.** The check named `_CGSSetWindowBackgroundBlurRadius`. Nothing in
+this project calls it: winit's macOS backend does, in `set_blur`, with `CGSMainConnectionID`
+beside it, and libcosmic's iced pins `pop-os/winit` at `9567503`. No window here asks for blur,
+but the linker keeps the import whether or not the call is reached, and the check reads imports.
+winit 0.30.13 and the fork's other revisions in the cargo cache carry the same call, so no
+update removes it.
+
+**Decision**: `grmrgecko/winit`, branch `no-private-blur`, is `9567503` with the two declarations
+removed and `set_blur` doing nothing on macOS. The root `Cargo.toml` patches every winit crate to
+it, since patching `winit-appkit` alone would leave two copies of `winit-core`. It moves with the
+libcosmic revision. The direct-download build takes the same patch, having no use for blur
+either. `bundle.sh` now refuses to sign an App Store bundle whose executables import any `_CGS`
+followed by a capital, the prefix of the window server's private calls; the public
+`CGShieldingWindowLevel` does not match.
+
+**The server entitlement stays.** The second message said `com.apple.security.network.server` had
+no matching functionality. It has: each network port binds UDP ports and takes session
+invitations from other machines (R-097). The helper does the listening and carries only the
+sandbox and inherit, which is the likely reason the check saw none, though Apple does not say.
+The answer is a reply and a note in App Review Information describing RTP-MIDI and how to see a
+port from Audio MIDI Setup on another Mac, not a change to the build.
+
+**Evidence**, `make appstore` on the development Mac:
+
+- Before, `nm -u` on the full binary listed `_CGSMainConnectionID` and
+  `_CGSSetWindowBackgroundBlurRadius` for both architectures; the headless binary listed neither.
+- After, `nm -u -arch arm64` and `-arch x86_64` list no `_CGS` private symbol in either
+  executable, and `strings` finds no `CGSSetWindowBackgroundBlurRadius` in the app.
+- `codesign --verify --deep --strict` passes on the bundle.
+
+**Not checked**: App Review's verdict on the rebuilt package, and its answer to the reply.

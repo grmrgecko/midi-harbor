@@ -135,6 +135,23 @@ integer_division = "warn"
 [patch.crates-io]
 btleplug = { git = "https://github.com/grmrgecko/btleplug", rev = "3a9da4bd65697593d127c124cf332b835d240802" }
 
+# winit's macOS backend imports the private CGSSetWindowBackgroundBlurRadius for window blur, which
+# the Mac App Store rejects in any binary that links it (research R-110). The fork is libcosmic's
+# pinned revision with that call removed. Every winit crate is listed so that all of them come from
+# one source; move the fork along with the libcosmic revision in crates/gui/Cargo.toml.
+[patch."https://github.com/pop-os/winit.git"]
+winit = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-android = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-appkit = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-common = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-core = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-orbital = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-uikit = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-wayland = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-web = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-win32 = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+winit-x11 = { git = "https://github.com/grmrgecko/winit", rev = "2b36ab9e35cdf59916d1ceef1b49fc8169266ae8" }
+
 # Dependencies build without debug info in dev and test builds. Each of the workspace's test
 # binaries otherwise links libcosmic's debug info, which made relinking after a one-line change
 # take about two minutes on the development Mac instead of about ten seconds. The workspace's own
